@@ -21,11 +21,11 @@ import {
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'framer-motion';
 import { v4 as uuidv4 } from 'uuid';
+import Bytez from 'bytez.js';
 import { cn } from './utils/cn';
 
-// API anahtarlarini Vite ortam degiskenlerinden okuyoruz.
-// .env dosyaniza VITE_GROQ_API_KEY ve VITE_TAVILY_API_KEY ekleyebilirsiniz.
-const GROQ_API_KEY = (import.meta as any).env.VITE_GROQ_API_KEY as string | undefined;
+// API anahtarları
+const BYTEZ_API_KEY = (import.meta as any).env.VITE_BYTEZ_API_KEY as string | undefined;
 const TAVILY_API_KEY = (import.meta as any).env.VITE_TAVILY_API_KEY as string | undefined;
 
 // ------------ TIPLER ------------
@@ -128,17 +128,43 @@ const THEMES: Record<ThemeId, { primary: string; chip: string; softBg: string; g
   },
 };
 
-// Basit sistem log tipi
 interface SystemLog {
   id: string;
   message: string;
   time: string;
 }
 
+// ------------ BYTEZ SETUP ------------
+const bytez = BYTEZ_API_KEY ? new Bytez(BYTEZ_API_KEY) : null;
+const bytezModel = bytez ? bytez.model('openai/gpt-oss-120b') : null;
+
+// Bytez output parser
+const extractBytezText = (output: any): string => {
+  if (!output) return 'Yanıt alınamadı.';
+
+  if (typeof output === 'string') return output;
+
+  if (Array.isArray(output)) {
+    return output
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (item?.text) return item.text;
+        if (item?.content) return item.content;
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  if (output?.text) return output.text;
+  if (output?.content) return output.content;
+
+  return JSON.stringify(output, null, 2);
+};
+
 // ------------ ANA BILESEN ------------
 
 const App: React.FC = () => {
-  // Durumlar
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
     const saved = localStorage.getItem('kuantist_sessions_v2');
     if (saved) return JSON.parse(saved);
@@ -152,7 +178,15 @@ const App: React.FC = () => {
     ];
   });
 
-  const [activeId, setActiveId] = useState<string>(() => sessions[0]?.id);
+  const [activeId, setActiveId] = useState<string>(() => {
+    const saved = localStorage.getItem('kuantist_sessions_v2');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return parsed?.[0]?.id ?? '';
+    }
+    return '';
+  });
+
   const [input, setInput] = useState('');
   const [theme, setTheme] = useState<ThemeId>('indigo');
   const [personality, setPersonality] = useState<Personality>(PERSONALITIES[0]);
@@ -165,12 +199,10 @@ const App: React.FC = () => {
   const activeSession = sessions.find((s) => s.id === activeId) ?? sessions[0];
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
-  // Persist sohbetler
   useEffect(() => {
     localStorage.setItem('kuantist_sessions_v2', JSON.stringify(sessions));
   }, [sessions]);
 
-  // Otomatik scroll
   useEffect(() => {
     if (chatScrollRef.current) {
       chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
@@ -179,7 +211,6 @@ const App: React.FC = () => {
 
   const themeConf = THEMES[theme];
 
-  // Yardimci: log ekle
   const addLog = (message: string) => {
     setLogs((prev) => [
       {
@@ -194,7 +225,6 @@ const App: React.FC = () => {
     ]);
   };
 
-  // Yardimci: aktif sohbette mesaj guncelle
   const updateActiveMessages = (updater: (prev: Message[]) => Message[]) => {
     setSessions((prev) =>
       prev.map((s) => {
@@ -209,7 +239,6 @@ const App: React.FC = () => {
     );
   };
 
-  // Yeni sohbet
   const handleNewChat = () => {
     const next: ChatSession = {
       id: uuidv4(),
@@ -222,12 +251,13 @@ const App: React.FC = () => {
     if (window.innerWidth < 768) setIsSidebarOpen(false);
   };
 
-  // Sohbet sil
   const handleDeleteChat = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    setSessions((prev) => prev.filter((s) => s.id !== id));
+
+    const remaining = sessions.filter((s) => s.id !== id);
+    setSessions(remaining);
+
     if (id === activeId) {
-      const remaining = sessions.filter((s) => s.id !== id);
       if (remaining.length === 0) {
         const fresh: ChatSession = {
           id: uuidv4(),
@@ -243,7 +273,6 @@ const App: React.FC = () => {
     }
   };
 
-  // Ana istek: mesaj gonder
   const sendMessage = async () => {
     if (!input.trim() || !activeSession) return;
 
@@ -257,9 +286,9 @@ const App: React.FC = () => {
       createdAt: Date.now(),
       type: 'text',
     };
+
     updateActiveMessages((prev) => [...prev, userMsg]);
 
-    // Görsel modu aktifse direkt görsel isteği olarak yorumla
     const wantsImage =
       imageMode ||
       content.toLowerCase().includes('resim çiz') ||
@@ -271,35 +300,38 @@ const App: React.FC = () => {
     try {
       if (wantsImage) {
         addLog('🎨 Görsel oluşturma isteği alındı');
-        const prompt = content
-          .replace(/^\/img/i, '')
-          .replace(/resim çiz/gi, '')
-          .replace(/görsel oluştur/gi, '')
-          .trim() || 'detaylı, sinematik bir illüstrasyon';
 
-        // Pollinations ile görsel
+        const prompt =
+          content
+            .replace(/^\/img/i, '')
+            .replace(/resim çiz/gi, '')
+            .replace(/görsel oluştur/gi, '')
+            .trim() || 'detaylı, sinematik bir illüstrasyon';
+
         const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(
           prompt,
         )}?width=1024&height=1024&nologo=true`;
 
-        // Küçük bir bekleme efekti
         await new Promise((r) => setTimeout(r, 1600));
 
         const aiMsg: Message = {
           id: uuidv4(),
           role: 'assistant',
           type: 'image',
-          content: `İstediğin tarza uygun bir görsel oluşturdum. İstersen komutu biraz daha detaylandırarak tekrar deneyebilirsin.`,
+          content: 'İstediğin tarza uygun bir görsel oluşturdum. İstersen komutu daha detaylı verip yeniden deneyebilirsin.',
           imageUrl,
           createdAt: Date.now(),
         };
+
         updateActiveMessages((prev) => [...prev, aiMsg]);
         addLog('✅ Görsel hazır');
         return;
       }
 
-      // İnternet araması gerektiriyor mu?
-      const needsSearch = content.toLowerCase().startsWith('ara ') || /\b202[4-9]|202\d|fiyat|güncel|hava durumu|son durum\b/iu.test(content);
+      const needsSearch =
+        content.toLowerCase().startsWith('ara ') ||
+        /\b202[4-9]|202\d|fiyat|güncel|hava durumu|son durum\b/iu.test(content);
+
       let searchContext = '';
 
       if (needsSearch && TAVILY_API_KEY) {
@@ -317,53 +349,73 @@ const App: React.FC = () => {
           });
 
           const data = await tavilyRes.json();
+
           if (Array.isArray(data.results) && data.results.length) {
             searchContext =
               '\n\n[İNTERNET VERİSİ]\n' +
               data.results
                 .map((r: any, i: number) => `(${i + 1}) ${r.title}\n${r.content}`)
                 .join('\n---\n');
+
             addLog(`✅ Tavily ${data.results.length} sonuç döndürdü`);
+          } else {
+            addLog('ℹ️ Tavily sonuç döndürmedi');
           }
         } catch (err) {
+          console.error(err);
           addLog('⚠️ Tavily isteği başarısız oldu');
         }
       }
 
-      if (!GROQ_API_KEY) {
-        addLog('❗ GROQ API anahtarı ortamda bulunamadı');
+      if (!BYTEZ_API_KEY || !bytezModel) {
+        addLog('❗ Bytez API anahtarı ortamda bulunamadı');
         const fallback: Message = {
           id: uuidv4(),
           role: 'assistant',
           content:
-            'Sunucu tarafında Groq API anahtarı tanımlı değil gibi görünüyor. Lütfen geliştirici ortamında VITE_GROQ_API_KEY değişkenini ayarla.',
+            'Bytez API anahtarı tanımlı değil gibi görünüyor. Lütfen .env içinde VITE_BYTEZ_API_KEY değişkenini ayarla.',
           createdAt: Date.now(),
         };
         updateActiveMessages((prev) => [...prev, fallback]);
         return;
       }
 
-      addLog('🤖 Groq ile yanıt hazırlanıyor…');
+      addLog('🤖 Bytez ile yanıt hazırlanıyor…');
 
-      const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${GROQ_API_KEY}`,
-          'Content-Type': 'application/json',
+      const messagesForModel = [
+        {
+          role: 'system',
+          content: personality.systemPrompt + searchContext,
         },
-        body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
-          temperature: 0.4,
-          messages: [
-            { role: 'system', content: personality.systemPrompt + searchContext },
-            ...activeSession.messages.map((m) => ({ role: m.role, content: m.content })),
-            { role: 'user', content },
-          ],
-        }),
-      });
+        ...activeSession.messages
+          .filter((m) => m.type !== 'image')
+          .map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
+        {
+          role: 'user',
+          content,
+        },
+      ];
 
-      const groqJson = await groqRes.json();
-      const answer = groqJson.choices?.[0]?.message?.content || 'Bir şeyler ters gitti, yanıt oluşturulamadı.';
+      const { error, output } = await bytezModel.run(messagesForModel as any);
+
+      if (error) {
+        console.error(error);
+        addLog('❌ Bytez model hatası');
+        const failMsg: Message = {
+          id: uuidv4(),
+          role: 'assistant',
+          content: 'Model tarafında bir hata oluştu. Lütfen tekrar dene.',
+          createdAt: Date.now(),
+          type: 'text',
+        };
+        updateActiveMessages((prev) => [...prev, failMsg]);
+        return;
+      }
+
+      const answer = extractBytezText(output) || 'Bir şeyler ters gitti, yanıt oluşturulamadı.';
 
       const aiMsg: Message = {
         id: uuidv4(),
@@ -372,17 +424,21 @@ const App: React.FC = () => {
         createdAt: Date.now(),
         type: 'text',
       };
+
       updateActiveMessages((prev) => [...prev, aiMsg]);
       addLog('✅ Yanıt gönderildi');
     } catch (err) {
       console.error(err);
       addLog('❌ Beklenmeyen bir hata oluştu');
+
       const fail: Message = {
         id: uuidv4(),
         role: 'assistant',
         content: 'Bir hata oluştu, kısa bir süre sonra tekrar dener misin?',
         createdAt: Date.now(),
+        type: 'text',
       };
+
       updateActiveMessages((prev) => [...prev, fail]);
     } finally {
       setIsProcessing(false);
@@ -398,8 +454,6 @@ const App: React.FC = () => {
 
   const isEmpty = !activeSession?.messages.length;
 
-  // ------------ ARAYUZ ------------
-
   return (
     <div
       className={cn(
@@ -407,7 +461,6 @@ const App: React.FC = () => {
         themeConf.gradient,
       )}
     >
-      {/* SOL MENU */}
       <AnimatePresence initial={false}>
         {isSidebarOpen && (
           <motion.aside
@@ -417,7 +470,6 @@ const App: React.FC = () => {
             transition={{ type: 'spring', stiffness: 260, damping: 24 }}
             className="relative z-20 flex h-full w-72 flex-col border-r border-slate-200/70 bg-white/90 backdrop-blur-xl shadow-xl"
           >
-            {/* Logo alanı */}
             <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
               <div className="flex items-center gap-2">
                 <div
@@ -442,7 +494,6 @@ const App: React.FC = () => {
               </button>
             </div>
 
-            {/* Yeni sohbet butonu */}
             <div className="border-b border-slate-100 px-4 py-3">
               <button
                 onClick={handleNewChat}
@@ -457,7 +508,6 @@ const App: React.FC = () => {
               </button>
             </div>
 
-            {/* Sohbet listesi */}
             <div className="flex-1 overflow-y-auto px-3 py-3 space-y-1 scrollbar-thin">
               <div className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                 Sohbetler
@@ -512,9 +562,7 @@ const App: React.FC = () => {
               })}
             </div>
 
-            {/* Tema ve kişilik seçimi */}
             <div className="border-t border-slate-100 bg-slate-50/60 px-4 py-3 space-y-3">
-              {/* Tema */}
               <div>
                 <div className="mb-1 flex items-center justify-between text-[11px] text-slate-500">
                   <span className="inline-flex items-center gap-1 font-semibold">
@@ -536,7 +584,6 @@ const App: React.FC = () => {
                 </div>
               </div>
 
-              {/* Kişilik */}
               <button
                 onClick={() => setIsSettingsOpen(true)}
                 className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 py-2 text-left text-xs text-slate-600 shadow-sm transition hover:border-slate-300"
@@ -557,9 +604,7 @@ const App: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* ANA ALAN */}
       <div className="relative flex min-w-0 flex-1 flex-col">
-        {/* Üst bar */}
         <header className="flex h-14 items-center justify-between border-b border-slate-200/70 bg-white/80 px-3 shadow-sm backdrop-blur-md md:px-6">
           <div className="flex items-center gap-2">
             {!isSidebarOpen && (
@@ -611,11 +656,8 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        {/* İçerik */}
         <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-          {/* Sohbet paneli */}
           <section className="flex min-w-0 flex-1 flex-col border-slate-100/80 bg-gradient-to-b from-white/70 to-slate-50/80">
-            {/* Hoşgeldin / Mesaj listesi */}
             <div
               ref={chatScrollRef}
               className="flex-1 space-y-4 overflow-y-auto px-3 py-4 scrollbar-thin md:px-8 md:py-6"
@@ -686,7 +728,7 @@ const App: React.FC = () => {
                       <div
                         className={cn(
                           'mt-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-2xl text-[12px] shadow-sm',
-                          m.role === 'user' ? 'bg-slate-900 text-slate-50' : themeConf.primary + ' text-white',
+                          m.role === 'user' ? 'bg-slate-900 text-slate-50' : `${themeConf.primary} text-white`,
                         )}
                       >
                         {m.role === 'user' ? <User size={14} /> : <Monitor size={14} />}
@@ -749,7 +791,6 @@ const App: React.FC = () => {
               )}
             </div>
 
-            {/* Girdi alanı */}
             <div className="border-t border-slate-200/70 bg-white/90 px-3 py-3 backdrop-blur-md md:px-8 md:py-4">
               <div className="mx-auto flex w-full max-w-3xl items-end gap-2 rounded-3xl border border-slate-200 bg-slate-50/80 px-2 py-1 shadow-inner">
                 <button
@@ -791,17 +832,16 @@ const App: React.FC = () => {
                   <Send size={17} />
                 </button>
               </div>
+
               <div className="mx-auto mt-1 flex max-w-3xl items-center justify-between text-[10px] text-slate-400">
                 <span>
-                  Kuantist; Groq, Tavily ve dahili görsel motoru ile çalışır. Yanıtlar hata içerebilir.
+                  Kuantist; Bytez, Tavily ve dahili görsel motoru ile çalışır. Yanıtlar hata içerebilir.
                 </span>
               </div>
             </div>
           </section>
 
-          {/* Sağ panel – kişilik & loglar */}
           <aside className="hidden w-72 flex-col border-l border-slate-200/70 bg-white/80 px-4 py-4 md:flex">
-            {/* Kişilik kartı */}
             <div className="mb-4 rounded-3xl border border-slate-200 bg-slate-50/80 p-3 shadow-sm">
               <div className="mb-2 flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -823,7 +863,6 @@ const App: React.FC = () => {
               <p className="text-[11px] leading-snug text-slate-500">{personality.description}</p>
             </div>
 
-            {/* Hızlı aksiyonlar */}
             <div className="mb-4 space-y-2 text-[11px]">
               <div className="text-[11px] font-semibold text-slate-500">Hızlı ayarlar</div>
 
@@ -852,7 +891,6 @@ const App: React.FC = () => {
               </button>
             </div>
 
-            {/* Sistem logları */}
             <div className="flex min-h-0 flex-1 flex-col rounded-3xl border border-slate-200 bg-slate-50/80 p-3 text-[11px]">
               <div className="mb-2 flex items-center justify-between text-slate-500">
                 <span className="inline-flex items-center gap-1 font-semibold">
@@ -880,7 +918,6 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {/* Kişilik / panel ayarları modalı */}
       <AnimatePresence>
         {isSettingsOpen && (
           <motion.div
@@ -918,7 +955,6 @@ const App: React.FC = () => {
               </div>
 
               <div className="max-h-[60vh] space-y-5 overflow-y-auto px-5 py-4 scrollbar-thin">
-                {/* Kişilik seçimi */}
                 <div>
                   <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-slate-600">
                     <User size={13} /> Aktif kişilik
@@ -949,7 +985,6 @@ const App: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Tema önizleme */}
                 <div>
                   <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-slate-600">
                     <Palette size={13} /> Renk teması
@@ -975,11 +1010,10 @@ const App: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Bilgi notu */}
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-500">
                   <p>
-                    API anahtarları bu arayüzde gösterilmez ve buradan düzenlenmez. Güvenlik için yalnızca
-                    sunucu / geliştirme ortamında VITE_GROQ_API_KEY ve VITE_TAVILY_API_KEY şeklinde tanımlanmalıdır.
+                    API anahtarlarını doğrudan frontend içinde tutmak güvenli değildir. Üretimde Bytez ve Tavily
+                    isteklerini backend proxy üzerinden geçirmen önerilir.
                   </p>
                 </div>
               </div>
