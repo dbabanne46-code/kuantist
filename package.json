@@ -32,4 +32,8 @@
     "vite-plugin-singlefile": "2.3.0"
   }
 }
-npm i bytez.js
+{
+  "dependencies": {
+    "bytez.js": "^3.0.0"
+  }
+}
