@@ -27,6 +27,8 @@ import { cn } from './utils/cn';
 // API anahtarları
 const BYTEZ_API_KEY = (import.meta as any).env.VITE_BYTEZ_API_KEY as string | undefined;
 const TAVILY_API_KEY = (import.meta as any).env.VITE_TAVILY_API_KEY as string | undefined;
+const bytez = BYTEZ_API_KEY ? new Bytez(BYTEZ_API_KEY) : null;
+const bytezModel = bytez ? bytez.model('openai/gpt-oss-120b') : null;
 
 // ------------ TIPLER ------------
 type Role = 'user' | 'assistant';
