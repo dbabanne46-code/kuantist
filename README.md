@@ -29,7 +29,7 @@ VITE_BYTEZ_API_KEY=
 VITE_TAVILY_API_KEY=
 ```
 
-Vercel üretim ortamında en az `OPENAI_API_KEY` tanımlı olmalı. `VITE_BYTEZ_API_KEY` yedek motor için, `VITE_TAVILY_API_KEY` ise internet araması için kullanılır.
+Vercel üretim ortamında gerçek yapay zeka sohbeti için `OPENAI_API_KEY` tanımlı olmalı. Key yoksa uygulama kilitlenmez; `/api/chat` demo yardımcı cevabı döndürür. `VITE_BYTEZ_API_KEY` yedek motor için, `VITE_TAVILY_API_KEY` ise internet araması için kullanılır.
 
 ## Komutlar
 

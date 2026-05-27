@@ -190,7 +190,10 @@ const callKuantistAssistant = async (
     throw new Error('Kuantist API bos yanit dondurdu.');
   }
 
-  return data.answer.trim();
+  return {
+    answer: data.answer.trim(),
+    model: typeof data?.model === 'string' ? data.model : 'unknown',
+  };
 };
 
 // ------------ ANA BILESEN ------------
@@ -253,7 +256,7 @@ const App: React.FC = () => {
       ? 'OpenAI Core'
       : assistantEngine === 'bytez'
         ? 'Bytez yedek'
-        : 'Kurulum gerekli';
+        : 'Demo yardımcı';
 
   const addLog = (message: string) => {
     setLogs((prev) => [
@@ -430,7 +433,7 @@ const App: React.FC = () => {
 
       try {
         addLog('Kuantist Core ile yanit hazirlaniyor...');
-        const answer = await callKuantistAssistant(textMessages, personality.id, searchContext);
+        const { answer, model } = await callKuantistAssistant(textMessages, personality.id, searchContext);
 
         const aiMsg: Message = {
           id: uuidv4(),
@@ -441,7 +444,7 @@ const App: React.FC = () => {
         };
 
         updateActiveMessages((prev) => [...prev, aiMsg]);
-        setAssistantEngine('openai');
+        setAssistantEngine(model === 'local-demo' ? 'offline' : 'openai');
         addLog('Kuantist Core yaniti gonderildi');
         return;
       } catch (err) {
