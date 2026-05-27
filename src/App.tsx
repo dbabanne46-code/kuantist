@@ -52,7 +52,7 @@ type ChatSession = {
   createdAt: number;
 };
 
-type AssistantEngine = 'openai' | 'bytez' | 'offline';
+type AssistantEngine = 'openai' | 'pollinations' | 'bytez' | 'offline';
 
 type ThemeId = 'indigo' | 'emerald' | 'violet' | 'amber' | 'rose' | 'cyan';
 
@@ -254,6 +254,8 @@ const App: React.FC = () => {
   const engineLabel =
     assistantEngine === 'openai'
       ? 'OpenAI Core'
+      : assistantEngine === 'pollinations'
+        ? 'Ücretsiz AI'
       : assistantEngine === 'bytez'
         ? 'Bytez yedek'
         : 'Demo yardımcı';
@@ -444,7 +446,9 @@ const App: React.FC = () => {
         };
 
         updateActiveMessages((prev) => [...prev, aiMsg]);
-        setAssistantEngine(model === 'local-demo' ? 'offline' : 'openai');
+        setAssistantEngine(
+          model === 'local-demo' ? 'offline' : model === 'pollinations' ? 'pollinations' : 'openai',
+        );
         addLog('Kuantist Core yaniti gonderildi');
         return;
       } catch (err) {
@@ -915,7 +919,7 @@ const App: React.FC = () => {
 
               <div className="mx-auto mt-1 flex max-w-3xl items-center justify-between text-[10px] text-slate-400">
                 <span>
-                  Kuantist; OpenAI Core, Bytez yedeği, Tavily araması ve dahili görsel motoru ile çalışır. Yanıtlar hata içerebilir.
+                  Kuantist; OpenAI Core, ücretsiz AI yedeği, Tavily araması ve dahili görsel motoru ile çalışır. Yanıtlar hata içerebilir.
                 </span>
               </div>
             </div>
@@ -960,7 +964,7 @@ const App: React.FC = () => {
                 </div>
                 <div className="flex items-center gap-2 rounded-2xl bg-slate-50 px-2 py-1.5">
                   <ShieldCheck size={13} className="text-slate-400" />
-                  <span>Bytez motoru otomatik yedek olarak kalır.</span>
+                  <span>OpenAI çalışmazsa ücretsiz AI yedeği devreye girer.</span>
                 </div>
               </div>
             </div>

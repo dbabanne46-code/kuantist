@@ -59,6 +59,44 @@ function createLocalAnswer(messages: ChatMessage[], mode: string) {
   return `${intro}\n\nAnladigim kadariyla sunu istiyorsun: "${lastMessage}"\n\nSana yardim etmek icin once bunu kucuk parcalara bolebiliriz:\n\n1. Amac: Ne elde etmek istiyorsun?\n2. Engel: Su an nerede takildin?\n3. Cikti: Cevap, kod, plan, metin veya fikir mi lazim?\n\nBunlardan birini yazarsan devamini daha net hazirlarim.`;
 }
 
+function buildPlainPrompt(messages: ChatMessage[], mode: string, searchContext: string) {
+  const modePrompt = MODE_PROMPTS[mode] ?? MODE_PROMPTS.kuantist;
+  const chat = messages
+    .map((message) => `${message.role === 'assistant' ? 'Asistan' : 'Kullanici'}: ${message.content}`)
+    .join('\n');
+
+  return [
+    BASE_ASSISTANT_PROMPT,
+    modePrompt,
+    searchContext,
+    'Asagidaki sohbeti dogal Turkce ile cevapla. Sadece asistan cevabini yaz.',
+    chat,
+    'Asistan:',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+async function createPollinationsAnswer(messages: ChatMessage[], mode: string, searchContext: string) {
+  const prompt = buildPlainPrompt(messages, mode, searchContext).slice(0, 12000);
+  const response = await fetch(`https://text.pollinations.ai/${encodeURIComponent(prompt)}`, {
+    headers: {
+      Accept: 'text/plain',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Pollinations request failed with ${response.status}`);
+  }
+
+  const answer = (await response.text()).trim();
+  if (!answer) {
+    throw new Error('Pollinations returned an empty response');
+  }
+
+  return answer;
+}
+
 function parseBody(body: unknown): Record<string, unknown> {
   if (!body) return {};
   if (typeof body === 'string') {
@@ -104,34 +142,39 @@ export default async function handler(req: any, res: any) {
     return res.status(400).json({ error: 'At least one message is required.' });
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return res.status(200).json({
-      answer: createLocalAnswer(messages, mode),
-      model: 'local-demo',
-    });
-  }
-
-  const client = new OpenAI({ apiKey });
   const model = process.env.OPENAI_MODEL || 'gpt-5.5';
   const modePrompt = MODE_PROMPTS[mode] ?? MODE_PROMPTS.kuantist;
   const instructions = [BASE_ASSISTANT_PROMPT, modePrompt, searchContext].filter(Boolean).join('\n\n');
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (apiKey) {
+    try {
+      const client = new OpenAI({ apiKey });
+      const response = await client.responses.create({
+        model,
+        instructions,
+        input: messages as any,
+        store: false,
+        reasoning: { effort: 'medium' },
+      } as any);
+
+      return res.status(200).json({
+        answer: response.output_text,
+        model,
+      });
+    } catch (error) {
+      console.error('OpenAI request failed, falling back to Pollinations:', error);
+    }
+  }
 
   try {
-    const response = await client.responses.create({
-      model,
-      instructions,
-      input: messages as any,
-      store: false,
-      reasoning: { effort: 'medium' },
-    } as any);
-
+    const answer = await createPollinationsAnswer(messages, mode, searchContext);
     return res.status(200).json({
-      answer: response.output_text,
-      model,
+      answer,
+      model: 'pollinations',
     });
   } catch (error) {
-    console.error(error);
+    console.error('Pollinations request failed, falling back to local demo:', error);
     return res.status(200).json({
       answer: createLocalAnswer(messages, mode),
       model: 'local-demo',

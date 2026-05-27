@@ -5,7 +5,8 @@ Kuantist, React ve Vite ile geliştirilmiş Türkçe odaklı bir yapay zeka sohb
 ## Özellikler
 
 - OpenAI destekli güvenli Vercel API rotası: `/api/chat`
-- Bytez tabanlı yedek sohbet motoru
+- OpenAI çalışmadığında anahtarsız Pollinations metin yedeği
+- Bytez tabanlı eski yedek sohbet motoru
 - Tavily ile güncel arama bağlamı
 - Pollinations tabanlı görsel üretim modu
 - Çoklu sohbet geçmişi ve kişilik modları
@@ -29,7 +30,7 @@ VITE_BYTEZ_API_KEY=
 VITE_TAVILY_API_KEY=
 ```
 
-Vercel üretim ortamında gerçek yapay zeka sohbeti için `OPENAI_API_KEY` tanımlı olmalı. Key yoksa uygulama kilitlenmez; `/api/chat` demo yardımcı cevabı döndürür. `VITE_BYTEZ_API_KEY` yedek motor için, `VITE_TAVILY_API_KEY` ise internet araması için kullanılır.
+Vercel üretim ortamında en iyi sohbet kalitesi için `OPENAI_API_KEY` tanımlı olmalı. Key yoksa veya OpenAI hata verirse uygulama kilitlenmez; `/api/chat` anahtarsız Pollinations metin yedeğine düşer. `VITE_BYTEZ_API_KEY` eski yedek motor için, `VITE_TAVILY_API_KEY` ise internet araması için kullanılır.
 
 ## Komutlar
 
