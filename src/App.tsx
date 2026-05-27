@@ -16,7 +16,10 @@ import {
   ImagePlus,
   Search,
   Terminal,
-  Brush
+  Brush,
+  Brain,
+  ServerCog,
+  ShieldCheck
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -48,6 +51,8 @@ type ChatSession = {
   messages: Message[];
   createdAt: number;
 };
+
+type AssistantEngine = 'openai' | 'bytez' | 'offline';
 
 type ThemeId = 'indigo' | 'emerald' | 'violet' | 'amber' | 'rose' | 'cyan';
 
@@ -136,10 +141,6 @@ interface SystemLog {
   time: string;
 }
 
-// ------------ BYTEZ SETUP ------------
-const bytez = BYTEZ_API_KEY ? new Bytez(BYTEZ_API_KEY) : null;
-const bytezModel = bytez ? bytez.model('openai/gpt-oss-120b') : null;
-
 // Bytez output parser
 const extractBytezText = (output: any): string => {
   if (!output) return 'Yanıt alınamadı.';
@@ -162,6 +163,37 @@ const extractBytezText = (output: any): string => {
   if (output?.content) return output.content;
 
   return JSON.stringify(output, null, 2);
+};
+
+const callKuantistAssistant = async (
+  messages: Array<{ role: Role; content: string }>,
+  mode: string,
+  searchContext: string,
+) => {
+  const response = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messages,
+      mode,
+      searchContext,
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data?.error || 'Kuantist API yanit veremedi.');
+  }
+
+  if (typeof data?.answer !== 'string' || !data.answer.trim()) {
+    throw new Error('Kuantist API bos yanit dondurdu.');
+  }
+
+  return {
+    answer: data.answer.trim(),
+    model: typeof data?.model === 'string' ? data.model : 'unknown',
+  };
 };
 
 // ------------ ANA BILESEN ------------
@@ -192,11 +224,12 @@ const App: React.FC = () => {
   const [input, setInput] = useState('');
   const [theme, setTheme] = useState<ThemeId>('indigo');
   const [personality, setPersonality] = useState<Personality>(PERSONALITIES[0]);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => window.innerWidth >= 768);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [logs, setLogs] = useState<SystemLog[]>([]);
   const [imageMode, setImageMode] = useState(false);
+  const [assistantEngine, setAssistantEngine] = useState<AssistantEngine>('openai');
 
   const activeSession = sessions.find((s) => s.id === activeId) ?? sessions[0];
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
@@ -206,12 +239,24 @@ const App: React.FC = () => {
   }, [sessions]);
 
   useEffect(() => {
+    if (activeSession?.id && activeId !== activeSession.id) {
+      setActiveId(activeSession.id);
+    }
+  }, [activeId, activeSession?.id]);
+
+  useEffect(() => {
     if (chatScrollRef.current) {
       chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
     }
   }, [activeSession?.messages.length, isProcessing]);
 
   const themeConf = THEMES[theme];
+  const engineLabel =
+    assistantEngine === 'openai'
+      ? 'OpenAI Core'
+      : assistantEngine === 'bytez'
+        ? 'Bytez yedek'
+        : 'Demo yardımcı';
 
   const addLog = (message: string) => {
     setLogs((prev) => [
@@ -228,9 +273,12 @@ const App: React.FC = () => {
   };
 
   const updateActiveMessages = (updater: (prev: Message[]) => Message[]) => {
+    const targetId = activeSession?.id;
+    if (!targetId) return;
+
     setSessions((prev) =>
       prev.map((s) => {
-        if (s.id !== activeId) return s;
+        if (s.id !== targetId) return s;
         const newMessages = updater(s.messages);
         const newTitle =
           s.messages.length === 0 && newMessages[0]
@@ -239,6 +287,7 @@ const App: React.FC = () => {
         return { ...s, messages: newMessages, title: newTitle };
       }),
     );
+    if (activeId !== targetId) setActiveId(targetId);
   };
 
   const handleNewChat = () => {
@@ -369,13 +418,48 @@ const App: React.FC = () => {
         }
       }
 
+      const textMessages = [
+        ...activeSession.messages
+          .filter((m) => m.type !== 'image')
+          .map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
+        {
+          role: 'user' as const,
+          content,
+        },
+      ];
+
+      try {
+        addLog('Kuantist Core ile yanit hazirlaniyor...');
+        const { answer, model } = await callKuantistAssistant(textMessages, personality.id, searchContext);
+
+        const aiMsg: Message = {
+          id: uuidv4(),
+          role: 'assistant',
+          content: answer,
+          createdAt: Date.now(),
+          type: 'text',
+        };
+
+        updateActiveMessages((prev) => [...prev, aiMsg]);
+        setAssistantEngine(model === 'local-demo' ? 'offline' : 'openai');
+        addLog('Kuantist Core yaniti gonderildi');
+        return;
+      } catch (err) {
+        console.warn(err);
+        addLog('Kuantist Core kullanilamadi, Bytez yedegine geciliyor');
+      }
+
       if (!BYTEZ_API_KEY || !bytezModel) {
-        addLog('❗ Bytez API anahtarı ortamda bulunamadı');
+        setAssistantEngine('offline');
+        addLog('Model anahtari bulunamadi');
         const fallback: Message = {
           id: uuidv4(),
           role: 'assistant',
           content:
-            'Bytez API anahtarı tanımlı değil gibi görünüyor. Lütfen .env içinde VITE_BYTEZ_API_KEY değişkenini ayarla.',
+            'Kuantist Core icin Vercel ortaminda OPENAI_API_KEY, yedek motor icin VITE_BYTEZ_API_KEY tanimli olmali.',
           createdAt: Date.now(),
         };
         updateActiveMessages((prev) => [...prev, fallback]);
@@ -389,16 +473,7 @@ const App: React.FC = () => {
           role: 'system',
           content: personality.systemPrompt + searchContext,
         },
-        ...activeSession.messages
-          .filter((m) => m.type !== 'image')
-          .map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-        {
-          role: 'user',
-          content,
-        },
+        ...textMessages,
       ];
 
       const { error, output } = await bytezModel.run(messagesForModel as any);
@@ -428,6 +503,7 @@ const App: React.FC = () => {
       };
 
       updateActiveMessages((prev) => [...prev, aiMsg]);
+      setAssistantEngine('bytez');
       addLog('✅ Yanıt gönderildi');
     } catch (err) {
       console.error(err);
@@ -459,7 +535,7 @@ const App: React.FC = () => {
   return (
     <div
       className={cn(
-        'h-screen w-full flex overflow-hidden bg-gradient-to-br text-slate-900',
+        'h-screen w-screen max-w-full flex overflow-hidden bg-gradient-to-br text-slate-900',
         themeConf.gradient,
       )}
     >
@@ -607,8 +683,8 @@ const App: React.FC = () => {
       </AnimatePresence>
 
       <div className="relative flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 items-center justify-between border-b border-slate-200/70 bg-white/80 px-3 shadow-sm backdrop-blur-md md:px-6">
-          <div className="flex items-center gap-2">
+        <header className="flex h-14 items-center justify-between gap-2 overflow-hidden border-b border-slate-200/70 bg-white/80 px-3 shadow-sm backdrop-blur-md md:px-6">
+          <div className="flex min-w-0 items-center gap-2">
             {!isSidebarOpen && (
               <button
                 onClick={() => setIsSidebarOpen(true)}
@@ -618,25 +694,26 @@ const App: React.FC = () => {
               </button>
             )}
 
-            <div className="flex flex-col">
-              <span className="text-[13px] font-semibold text-slate-800">
+            <div className="flex min-w-0 flex-col">
+              <span className="truncate text-[13px] font-semibold text-slate-800">
                 {activeSession?.title || 'Sohbet'}
               </span>
-              <span className="flex items-center gap-1 text-[11px] text-slate-400">
+              <span className="flex min-w-0 items-center gap-1 text-[11px] text-slate-400">
                 <span
                   className={cn(
                     'h-1.5 w-1.5 rounded-full',
                     isProcessing ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500',
                   )}
                 />
-                {isProcessing ? 'Yanıt hazırlanıyor…' : 'Hazır'}
+                <span className="truncate">{isProcessing ? 'Yanıt hazırlanıyor…' : `Hazır · ${engineLabel}`}</span>
               </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="hidden flex-shrink-0 items-center gap-2 sm:flex">
             <button
               onClick={() => setImageMode((m) => !m)}
+              title="Görsel modu"
               className={cn(
                 'inline-flex items-center gap-1 rounded-2xl border px-2.5 py-1.5 text-[11px] font-medium transition',
                 imageMode
@@ -645,15 +722,16 @@ const App: React.FC = () => {
               )}
             >
               <Brush size={13} />
-              Görsel modu
+              <span className="hidden sm:inline">Görsel modu</span>
             </button>
 
             <button
               onClick={() => setIsSettingsOpen(true)}
+              title="Panel"
               className="inline-flex items-center gap-1 rounded-2xl border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-600 shadow-sm transition hover:border-slate-300"
             >
               <Sparkles size={13} />
-              Panel
+              <span className="hidden sm:inline">Panel</span>
             </button>
           </div>
         </header>
@@ -665,10 +743,10 @@ const App: React.FC = () => {
               className="flex-1 space-y-4 overflow-y-auto px-3 py-4 scrollbar-thin md:px-8 md:py-6"
             >
               {isEmpty ? (
-                <div className="flex h-full flex-col items-center justify-center gap-6 text-center text-slate-500">
+                <div className="flex h-full w-full flex-col items-center justify-center gap-6 px-2 text-center text-slate-500">
                   <div
                     className={cn(
-                      'rounded-3xl border px-6 py-5 shadow-sm',
+                      'w-full max-w-sm rounded-3xl border px-5 py-5 shadow-sm',
                       themeConf.chip,
                     )}
                   >
@@ -676,9 +754,9 @@ const App: React.FC = () => {
                       <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-slate-900 text-slate-50">
                         <Monitor size={20} />
                       </div>
-                      <div className="text-left">
+                      <div className="min-w-0 text-left">
                         <div className="text-sm font-semibold text-slate-800">Kuantist hazır</div>
-                        <div className="text-xs text-slate-500">
+                        <div className="break-words text-xs text-slate-500">
                           Sohbet başlat, kod sor, metin yazdır, görsel iste…
                         </div>
                       </div>
@@ -837,7 +915,7 @@ const App: React.FC = () => {
 
               <div className="mx-auto mt-1 flex max-w-3xl items-center justify-between text-[10px] text-slate-400">
                 <span>
-                  Kuantist; Bytez, Tavily ve dahili görsel motoru ile çalışır. Yanıtlar hata içerebilir.
+                  Kuantist; OpenAI Core, Bytez yedeği, Tavily araması ve dahili görsel motoru ile çalışır. Yanıtlar hata içerebilir.
                 </span>
               </div>
             </div>
@@ -863,6 +941,28 @@ const App: React.FC = () => {
                 </button>
               </div>
               <p className="text-[11px] leading-snug text-slate-500">{personality.description}</p>
+            </div>
+
+            <div className="mb-4 rounded-3xl border border-slate-200 bg-white p-3 shadow-sm">
+              <div className="mb-2 flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-slate-900 text-slate-50">
+                  <Brain size={16} />
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[12px] font-semibold text-slate-800">Asistan çekirdeği</span>
+                  <span className="text-[11px] text-slate-500">{engineLabel}</span>
+                </div>
+              </div>
+              <div className="grid gap-2 text-[11px] text-slate-500">
+                <div className="flex items-center gap-2 rounded-2xl bg-slate-50 px-2 py-1.5">
+                  <ServerCog size={13} className="text-slate-400" />
+                  <span>OpenAI anahtarı Vercel API tarafında saklanır.</span>
+                </div>
+                <div className="flex items-center gap-2 rounded-2xl bg-slate-50 px-2 py-1.5">
+                  <ShieldCheck size={13} className="text-slate-400" />
+                  <span>Bytez motoru otomatik yedek olarak kalır.</span>
+                </div>
+              </div>
             </div>
 
             <div className="mb-4 space-y-2 text-[11px]">
