@@ -29,6 +29,14 @@
 
 /* Base resets */
 @layer base {
+  html,
+  body,
+  #root {
+    width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
   body {
     @apply antialiased bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100 font-sans;
   }
