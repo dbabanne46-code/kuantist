@@ -1,5 +1,5 @@
 {
-  "name": "react-vite-tailwind",
+  "name": "kuantist",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -10,10 +10,11 @@
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.19",
+    "bytez.js": "^3.0.0",
     "clsx": "^2.1.1",
     "framer-motion": "^12.35.0",
-    "groq-sdk": "^0.37.0",
     "lucide-react": "^0.577.0",
+    "openai": "^6.9.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-markdown": "^10.1.0",
@@ -30,10 +31,5 @@
     "typescript": "5.9.3",
     "vite": "7.2.4",
     "vite-plugin-singlefile": "2.3.0"
-  }
-}
-{
-  "dependencies": {
-    "bytez.js": "^3.0.0"
   }
 }
