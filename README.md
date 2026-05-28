@@ -1,6 +1,6 @@
-# Kuantist
+# Kuvin AI
 
-Kuantist, React ve Vite ile geliştirilmiş Türkçe odaklı bir yapay zeka sohbet arayüzüdür. Metin sohbeti, kişilik modları, web arama bağlamı, görsel üretim ve yedek model akışı içerir.
+Kuvin AI, React ve Vite ile geliştirilmiş Türkçe odaklı bir AI sohbet ve görsel stüdyo uygulamasıdır. Marka vaadi: **Think Beyond**. Metin sohbeti, web kaynaklı araştırma, görsel üretim, hazır prompt kütüphanesi, PWA kurulumu ve yedek model akışı içerir.
 
 ## Özellikler
 
@@ -10,7 +10,8 @@ Kuantist, React ve Vite ile geliştirilmiş Türkçe odaklı bir yapay zeka sohb
 - Tavily ile güncel arama bağlamı
 - Pollinations tabanlı görsel üretim modu
 - Çoklu sohbet geçmişi ve kişilik modları
-- Tema seçenekleri ve sistem akışı paneli
+- PWA kurulumu: bilgisayar ve mobilde uygulama gibi açılır
+- Kuvin AI markalı SEO, paylaşım görseli ve favicon assetleri
 
 ## Kurulum
 
@@ -42,4 +43,4 @@ npm run preview
 
 ## Güvenlik Notu
 
-OpenAI anahtarı frontend tarafına konulmaz; `/api/chat` Vercel fonksiyonu üzerinden sunucu tarafında kullanılır. Daha önce repoda `.env` dosyası tutulduysa ilgili anahtarları yenilemek iyi olur.
+OpenAI anahtarı frontend tarafına konulmaz; `/api/chat` Vercel fonksiyonu üzerinden sunucu tarafında kullanılır. Kullanıcılar kişisel bilgilerini paylaşmamalıdır.

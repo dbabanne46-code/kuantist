@@ -1,7 +1,7 @@
-import React from 'react'
-import ReactDOM from 'react-dom/client'
-import App from './App'
-import './index.css'
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+import './index.css';
 
 type InstallPromptChoice = {
   outcome: 'accepted' | 'dismissed';
@@ -21,7 +21,7 @@ const isStandaloneMode = () =>
 
 const showInstallHelp = () => {
   window.alert(
-    'Kuantist kurulumu:\n\nBilgisayar: Chrome/Edge adres cubugundaki yukle simgesine basin.\nAndroid: Chrome menusunden "Uygulamayi yukle" veya "Ana ekrana ekle" secin.\niPhone: Safari Paylas menusunden "Ana Ekrana Ekle" secin.',
+    'Kuvin AI kurulumu:\n\nBilgisayar: Chrome/Edge adres cubugundaki yukle simgesine basin.\nAndroid: Chrome menusunden "Uygulamayi yukle" veya "Ana ekrana ekle" secin.\niPhone: Safari Paylas menusunden "Ana Ekrana Ekle" secin.',
   );
 };
 
@@ -30,20 +30,20 @@ const ensureInstallButton = () => {
 
   installButton = document.createElement('button');
   installButton.type = 'button';
-  installButton.textContent = 'Kuantist’i yükle';
-  installButton.setAttribute('aria-label', 'Kuantist uygulamasını yükle');
+  installButton.textContent = "Kuvin AI'ı yükle";
+  installButton.setAttribute('aria-label', 'Kuvin AI uygulamasını yükle');
   installButton.style.cssText = [
     'position:fixed',
     'right:14px',
     'bottom:76px',
     'z-index:50',
-    'border:1px solid rgba(8,145,178,.24)',
-    'background:rgba(236,254,255,.96)',
-    'color:#155e75',
+    'border:1px solid rgba(34,211,238,.34)',
+    'background:linear-gradient(135deg,rgba(8,47,73,.96),rgba(15,23,42,.96))',
+    'color:#ecfeff',
     'border-radius:999px',
-    'box-shadow:0 12px 30px rgba(15,23,42,.16)',
+    'box-shadow:0 18px 45px rgba(8,145,178,.28)',
     'font:600 12px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
-    'padding:10px 14px',
+    'padding:11px 15px',
     'cursor:pointer',
     'backdrop-filter:blur(12px)',
   ].join(';');
@@ -67,7 +67,7 @@ const ensureInstallButton = () => {
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch((error) => {
-      console.warn('Kuantist service worker could not be registered:', error);
+      console.warn('Kuvin AI service worker could not be registered:', error);
     });
     ensureInstallButton();
   });
@@ -89,4 +89,4 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />
   </React.StrictMode>,
-)
+);

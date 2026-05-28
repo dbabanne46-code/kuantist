@@ -18,8 +18,9 @@ const MAX_MESSAGE_CHARS = 6000;
 const MAX_WEB_SOURCES = 5;
 
 const BASE_ASSISTANT_PROMPT = `
-Sen Kuantist adli genel amacli bir yapay zeka yardimcisisin.
+Sen Kuvin AI adli genel amacli bir yapay zeka yardimcisisin.
 Turkce konusan kullaniciya dogal, acik, guvenilir ve uygulanabilir cevaplar verirsin.
+Kuvin AI markasinin ana fikri "Think Beyond": dusunmeyi, uretmeyi ve tasarlamayi tek modern asistanda birlestirirsin.
 
 Davranis ilkelerin:
 - Kullanici Turkce konusursa Turkce cevap ver.
@@ -37,7 +38,7 @@ Web arastirma verisi varsa sadece kaynaklardan dogrulanabilen bilgileri kullan; 
 `.trim();
 
 const MODE_PROMPTS: Record<string, string> = {
-  kuantist: 'Dengeli, analitik ve sakin anlatim kullan. Gerektiginde maddelerle yaz.',
+  kuvin: 'Dengeli, analitik ve sakin anlatim kullan. Gerektiginde maddelerle yaz.',
   developer: 'Kidemli yazilim gelistirici gibi davran. Kodda temiz, uygulanabilir ve dogrudan ol.',
   writer: 'Yaratici metinlerde akici, canli ve hayal gucu yuksek bir dil kullan.',
   friend: 'Samimi ve destekleyici sohbet et. Konuyu dagitmadan hafif ve dogal kal.',
@@ -47,7 +48,7 @@ function createLocalAnswer(messages: ChatMessage[], mode: string) {
   const lastMessage = messages[messages.length - 1]?.content.trim() || '';
   const lower = lastMessage.toLocaleLowerCase('tr-TR');
   const intro =
-    'Kuantist demo modunda calisiyorum. Gercek model anahtari baglaninca daha derin ve dogal cevap verebilirim; simdilik sana pratik bir baslangic cevabi hazirladim.';
+    'Kuvin AI demo modunda calisiyor. Gercek model anahtari baglaninca daha derin ve dogal cevap verebilirim; simdilik sana pratik bir baslangic cevabi hazirladim.';
 
   if (!lastMessage) {
     return `${intro}\n\nBana ne yapmak istedigini yaz: kod, metin, plan, fikir veya ogrenmek istedigin konu.`;
@@ -69,7 +70,7 @@ function createLocalAnswer(messages: ChatMessage[], mode: string) {
 }
 
 function buildPlainPrompt(messages: ChatMessage[], mode: string, searchContext: string) {
-  const modePrompt = MODE_PROMPTS[mode] ?? MODE_PROMPTS.kuantist;
+  const modePrompt = MODE_PROMPTS[mode] ?? MODE_PROMPTS.kuvin;
   const chat = messages
     .map((message) => `${message.role === 'assistant' ? 'Asistan' : 'Kullanici'}: ${message.content}`)
     .join('\n');
@@ -300,7 +301,7 @@ export default async function handler(req: any, res: any) {
 
   const body = parseBody(req.body);
   const messages = normalizeMessages(body.messages);
-  const mode = typeof body.mode === 'string' ? body.mode : 'kuantist';
+  const mode = typeof body.mode === 'string' ? body.mode : 'kuvin';
   const webEnabled = body.webEnabled !== false;
   const searchContext =
     typeof body.searchContext === 'string' ? body.searchContext.slice(0, 6000) : '';
@@ -310,7 +311,7 @@ export default async function handler(req: any, res: any) {
   }
 
   const model = process.env.OPENAI_MODEL || 'gpt-5.5';
-  const modePrompt = MODE_PROMPTS[mode] ?? MODE_PROMPTS.kuantist;
+  const modePrompt = MODE_PROMPTS[mode] ?? MODE_PROMPTS.kuvin;
   const webContext = await collectWebContext(messages, webEnabled);
   const combinedSearchContext = [searchContext, webContext.context].filter(Boolean).join('\n\n');
   const instructions = [

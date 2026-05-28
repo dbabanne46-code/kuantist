@@ -1,41 +1,53 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  Plus,
-  Send,
-  Image as ImageIcon,
-  Mic,
-  Menu,
-  X,
-  MessageSquare,
-  Trash2,
-  Sparkles,
-  User,
-  Palette,
-  SlidersHorizontal,
-  ImagePlus,
-  Search,
-  Terminal,
   Brush,
+  CheckCircle2,
+  Code2,
+  Compass,
+  CreditCard,
+  ExternalLink,
+  FileText,
+  Globe2,
+  GraduationCap,
+  Image as ImageIcon,
+  ImagePlus,
+  Info,
+  Layers3,
+  Mail,
+  Menu,
+  MessageSquare,
+  Mic,
+  Palette,
+  PenLine,
+  Plus,
+  Search,
+  Send,
   ServerCog,
   ShieldCheck,
-  Globe2,
-  ExternalLink,
-  Newspaper,
-  CheckCircle2
+  SlidersHorizontal,
+  Sparkles,
+  Terminal,
+  Trash2,
+  User,
+  Wand2,
+  X,
+  type LucideIcon,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import { motion, AnimatePresence } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import { v4 as uuidv4 } from 'uuid';
 import Bytez from 'bytez.js';
 import { cn } from './utils/cn';
 
-// API anahtarları
 const BYTEZ_API_KEY = (import.meta as any).env.VITE_BYTEZ_API_KEY as string | undefined;
 const bytez = BYTEZ_API_KEY ? new Bytez(BYTEZ_API_KEY) : null;
 const bytezModel = bytez ? bytez.model('openai/gpt-oss-120b') : null;
 
-// ------------ TIPLER ------------
 type Role = 'user' | 'assistant';
+type AssistantEngine = 'openai' | 'pollinations' | 'bytez' | 'offline';
+type ThemeId = 'cyan' | 'emerald' | 'violet' | 'amber';
+type AppearanceMode = 'midnight' | 'nebula' | 'focus';
+type StudioView = 'home' | 'chat' | 'image' | 'prompts' | 'pricing' | 'about' | 'feedback';
 
 type WebSource = {
   title: string;
@@ -62,99 +74,202 @@ type ChatSession = {
   createdAt: number;
 };
 
-type AssistantEngine = 'openai' | 'pollinations' | 'bytez' | 'offline';
-
-type ThemeId = 'indigo' | 'emerald' | 'violet' | 'amber' | 'rose' | 'cyan';
-
-interface Personality {
+type Personality = {
   id: string;
   label: string;
   description: string;
   systemPrompt: string;
-}
+};
 
-// ------------ SABITLER ------------
+type PromptItem = {
+  icon: LucideIcon;
+  title: string;
+  text: string;
+  image?: boolean;
+};
+
+const STORAGE_KEY = 'kuvin_sessions_v1';
 
 const PERSONALITIES: Personality[] = [
   {
-    id: 'kuantist',
-    label: 'Kuantist Klasik',
+    id: 'kuvin',
+    label: 'Kuvin Core',
     description: 'Dengeli, analitik, sakin anlatım',
     systemPrompt:
-      'Senin adın Kuantist V.2.0. Türkçe konuşan, analitik, sakin ve net açıklamalar yapan bir yapay zeka asistanısın. Gereksiz uzatma, ama önemli yerleri kaçırma. Gerektiğinde madde madde yaz.',
+      'Senin adın Kuvin AI. Think Beyond sloganıyla çalışan, Türkçe konuşan, analitik, net ve yaratıcı bir yapay zeka asistanısın. Kullanıcıya sohbet, görsel üretim, kod, ödev ve fikir üretiminde uygulanabilir destek ver.',
   },
   {
     id: 'developer',
-    label: 'Geliştirici Modu',
+    label: 'Kuvin Code',
     description: 'Teknik, örnek odaklı, doğrudan',
     systemPrompt:
-      'Sen kıdemli bir yazılım geliştiricisin. Kod yazarken kısa, net ve doğrudan ol. Örnek kodlar ver, ama gereksiz açıklamalardan kaçın. Türkçe cevap ver, kodu mümkün olduğunca temiz tut.',
+      'Sen kıdemli bir yazılım geliştiricisin. Kod yazarken kısa, net ve doğrudan ol. Örnek kodlar ver, gereksiz açıklamalardan kaçın. Türkçe cevap ver.',
   },
   {
     id: 'writer',
-    label: 'Yazar Modu',
-    description: 'Yaratıcı, hikâye odaklı',
+    label: 'Kuvin Writer',
+    description: 'Yaratıcı, akıcı, marka odaklı',
     systemPrompt:
-      'Sen yaratıcı bir yazar asistansın. Metinleri akıcı, etkileyici ve hikâye tadında yeniden yazabilir, fikir üretebilirsin. Türkçe konuş ve dozunda süslü bir dil kullan.',
+      'Sen yaratıcı bir yazı asistanısın. Metinleri akıcı, etkileyici ve hikaye tadında yeniden yazabilir, fikir üretebilirsin. Türkçe konuş ve dozunda güçlü bir dil kullan.',
   },
   {
     id: 'friend',
-    label: 'Sohbet Modu',
-    description: 'Samimi, hafif esprili',
+    label: 'Kuvin Chat',
+    description: 'Samimi, destekleyici, doğal',
     systemPrompt:
-      'Sen arkadaş canlısı, samimi bir sohbet asistanısın. Türkçe konuş, arada hafif espriler yap ama konuyu dağıtma. Kullanıcıyı yargılama, destekleyici ol.',
+      'Sen arkadaş canlısı, samimi bir sohbet asistanısın. Türkçe konuş, konuyu dağıtma, destekleyici ve pratik kal.',
   },
 ];
 
-const THEMES: Record<ThemeId, { primary: string; chip: string; softBg: string; gradient: string }> = {
-  indigo: {
-    primary: 'bg-indigo-600',
-    chip: 'text-indigo-700 bg-indigo-50 border-indigo-100',
-    softBg: 'from-slate-50 to-indigo-50',
-    gradient: 'from-indigo-500/10 via-slate-50 to-sky-500/10',
+const THEMES: Record<ThemeId, { label: string; button: string; dot: string; chip: string; glow: string }> = {
+  cyan: {
+    label: 'Cyan',
+    button: 'bg-cyan-500 text-slate-950 hover:bg-cyan-300',
+    dot: 'bg-cyan-400',
+    chip: 'border-cyan-400/30 bg-cyan-400/10 text-cyan-100',
+    glow: 'shadow-[0_18px_60px_rgba(34,211,238,.18)]',
   },
   emerald: {
-    primary: 'bg-emerald-600',
-    chip: 'text-emerald-700 bg-emerald-50 border-emerald-100',
-    softBg: 'from-slate-50 to-emerald-50',
-    gradient: 'from-emerald-500/10 via-slate-50 to-teal-500/10',
+    label: 'Emerald',
+    button: 'bg-emerald-400 text-slate-950 hover:bg-emerald-300',
+    dot: 'bg-emerald-400',
+    chip: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100',
+    glow: 'shadow-[0_18px_60px_rgba(52,211,153,.16)]',
   },
   violet: {
-    primary: 'bg-violet-600',
-    chip: 'text-violet-700 bg-violet-50 border-violet-100',
-    softBg: 'from-slate-50 to-violet-50',
-    gradient: 'from-violet-500/10 via-slate-50 to-fuchsia-500/10',
+    label: 'Violet',
+    button: 'bg-violet-400 text-slate-950 hover:bg-violet-300',
+    dot: 'bg-violet-400',
+    chip: 'border-violet-400/30 bg-violet-400/10 text-violet-100',
+    glow: 'shadow-[0_18px_60px_rgba(167,139,250,.16)]',
   },
   amber: {
-    primary: 'bg-amber-500',
-    chip: 'text-amber-700 bg-amber-50 border-amber-100',
-    softBg: 'from-slate-50 to-amber-50',
-    gradient: 'from-amber-400/10 via-slate-50 to-orange-500/10',
-  },
-  rose: {
-    primary: 'bg-rose-600',
-    chip: 'text-rose-700 bg-rose-50 border-rose-100',
-    softBg: 'from-slate-50 to-rose-50',
-    gradient: 'from-rose-500/10 via-slate-50 to-red-500/10',
-  },
-  cyan: {
-    primary: 'bg-cyan-600',
-    chip: 'text-cyan-700 bg-cyan-50 border-cyan-100',
-    softBg: 'from-slate-50 to-cyan-50',
-    gradient: 'from-cyan-500/10 via-slate-50 to-sky-500/10',
+    label: 'Amber',
+    button: 'bg-amber-300 text-slate-950 hover:bg-amber-200',
+    dot: 'bg-amber-300',
+    chip: 'border-amber-300/30 bg-amber-300/10 text-amber-100',
+    glow: 'shadow-[0_18px_60px_rgba(252,211,77,.14)]',
   },
 };
 
-interface SystemLog {
+const APPEARANCE_MODES: Record<
+  AppearanceMode,
+  { label: string; description: string; app: string; sidebar: string; header: string; composer: string }
+> = {
+  midnight: {
+    label: 'Midnight',
+    description: 'Premium koyu tema',
+    app: 'bg-[linear-gradient(135deg,#020617_0%,#06111f_48%,#082f49_100%)]',
+    sidebar: 'bg-slate-950/88',
+    header: 'bg-slate-950/72',
+    composer: 'bg-slate-950/86',
+  },
+  nebula: {
+    label: 'Nebula',
+    description: 'Daha parlak stüdyo',
+    app: 'bg-[linear-gradient(135deg,#050816_0%,#111827_42%,#0e7490_100%)]',
+    sidebar: 'bg-[#050816]/88',
+    header: 'bg-[#050816]/72',
+    composer: 'bg-[#050816]/88',
+  },
+  focus: {
+    label: 'Focus',
+    description: 'Sade ve okunaklı',
+    app: 'bg-[linear-gradient(135deg,#020617_0%,#0f172a_60%,#111827_100%)]',
+    sidebar: 'bg-slate-950/94',
+    header: 'bg-slate-950/88',
+    composer: 'bg-slate-950/94',
+  },
+};
+
+const VIEWS: Array<{ id: StudioView; label: string; icon: LucideIcon }> = [
+  { id: 'home', label: 'Home', icon: Compass },
+  { id: 'chat', label: 'Chat', icon: MessageSquare },
+  { id: 'image', label: 'Image Studio', icon: ImagePlus },
+  { id: 'prompts', label: 'Prompt Library', icon: Layers3 },
+  { id: 'pricing', label: 'Planlar', icon: CreditCard },
+  { id: 'about', label: 'About', icon: Info },
+  { id: 'feedback', label: 'Feedback', icon: Mail },
+];
+
+const CAPABILITIES = [
+  { icon: FileText, title: 'Metin ve fikir', text: 'Blog, e-posta, kampanya, senaryo ve marka fikirleri.' },
+  { icon: ImagePlus, title: 'Görsel üretim', text: 'Prompt gir, kare formatta hızlı konsept görseller oluştur.' },
+  { icon: Code2, title: 'Kod yardımı', text: 'Hata ayıklama, açıklama, örnek kod ve proje planı.' },
+  { icon: GraduationCap, title: 'Öğrenme desteği', text: 'Konu anlatımı, özet, çalışma planı ve soru çözümü.' },
+  { icon: Globe2, title: 'Canlı web', text: 'Güncel konularda kaynaklı araştırma sonuçları.' },
+  { icon: ShieldCheck, title: 'Güvenli kullanım', text: 'API anahtarı frontend içinde tutulmaz, hassas veri uyarısı görünür.' },
+];
+
+const PROMPTS: PromptItem[] = [
+  {
+    icon: Sparkles,
+    title: 'Marka fikri',
+    text: 'Yeni bir AI uygulaması için isim, slogan ve kısa marka hikayesi üret.',
+  },
+  {
+    icon: ImagePlus,
+    title: 'Logo promptu',
+    text: 'Mavi-turkuaz neon ışıklı premium teknoloji logosu için görsel promptu oluştur.',
+    image: true,
+  },
+  {
+    icon: PenLine,
+    title: 'Instagram postu',
+    text: 'Yeni çıkan bir uygulama için kısa, etkileyici ve modern Instagram post metni yaz.',
+  },
+  {
+    icon: Code2,
+    title: 'Kod hatası',
+    text: 'Bu kodu incele, hatayı bul, nedenini açıkla ve düzeltilmiş halini ver.',
+  },
+  {
+    icon: Search,
+    title: 'Güncel araştırma',
+    text: 'Ara: Bugün yapay zeka alanında öne çıkan gelişmeleri kaynaklarıyla özetle.',
+  },
+  {
+    icon: Wand2,
+    title: 'Görsel sahne',
+    text: 'Gece atmosferinde cam ve neon detaylı fütüristik AI çalışma masası görseli oluştur.',
+    image: true,
+  },
+];
+
+const PLANS = [
+  { name: 'Free Studio', price: '0 TL', text: 'Sohbet, prompt denemeleri ve temel görsel üretim akışı.' },
+  { name: 'Creator', price: 'Yakında', text: 'Daha uzun sohbet geçmişi, gelişmiş görsel promptları ve hızlı yanıtlar.' },
+  { name: 'Pro', price: 'Yakında', text: 'Marka üretimi, ekip kullanımı, özel modeller ve daha güçlü web araştırması.' },
+];
+
+type SystemLog = {
   id: string;
   message: string;
   time: string;
-}
+};
 
-// Bytez output parser
+const createSession = (): ChatSession => ({
+  id: uuidv4(),
+  title: 'Yeni sohbet',
+  messages: [],
+  createdAt: Date.now(),
+});
+
+const readSessions = (): ChatSession[] => {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length) return parsed;
+    }
+  } catch {
+    localStorage.removeItem(STORAGE_KEY);
+  }
+  return [createSession()];
+};
+
 const extractBytezText = (output: any): string => {
   if (!output) return 'Yanıt alınamadı.';
-
   if (typeof output === 'string') return output;
 
   if (Array.isArray(output)) {
@@ -171,17 +286,16 @@ const extractBytezText = (output: any): string => {
 
   if (output?.text) return output.text;
   if (output?.content) return output.content;
-
   return JSON.stringify(output, null, 2);
 };
 
-const KuantistLogo = ({ className }: { className?: string }) => (
-  <span className={cn('inline-flex shrink-0 overflow-hidden rounded-xl bg-slate-950 shadow-sm', className)}>
-    <img src="/kuantist-logo.svg" alt="Kuantist logosu" className="h-full w-full object-cover" />
+const KuvinLogo = ({ className }: { className?: string }) => (
+  <span className={cn('inline-flex shrink-0 overflow-hidden rounded-lg bg-slate-950', className)}>
+    <img src="/kuvin-logo.png" alt="Kuvin AI logosu" className="h-full w-full object-cover" />
   </span>
 );
 
-const callKuantistAssistant = async (
+const callKuvinAssistant = async (
   messages: Array<{ role: Role; content: string }>,
   mode: string,
   searchContext: string,
@@ -190,22 +304,17 @@ const callKuantistAssistant = async (
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      messages,
-      mode,
-      searchContext,
-      webEnabled,
-    }),
+    body: JSON.stringify({ messages, mode, searchContext, webEnabled }),
   });
 
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(data?.error || 'Kuantist API yanit veremedi.');
+    throw new Error(data?.error || 'Kuvin API yanıt veremedi.');
   }
 
   if (typeof data?.answer !== 'string' || !data.answer.trim()) {
-    throw new Error('Kuantist API bos yanit dondurdu.');
+    throw new Error('Kuvin API boş yanıt döndürdü.');
   }
 
   const sources: WebSource[] = Array.isArray(data?.sources)
@@ -227,34 +336,19 @@ const callKuantistAssistant = async (
   };
 };
 
-// ------------ ANA BILESEN ------------
+const SectionShell = ({ children }: { children: ReactNode }) => (
+  <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-3 py-4 md:px-8 md:py-6">{children}</div>
+);
 
 const App: React.FC = () => {
-  const [sessions, setSessions] = useState<ChatSession[]>(() => {
-    const saved = localStorage.getItem('kuantist_sessions_v2');
-    if (saved) return JSON.parse(saved);
-    return [
-      {
-        id: uuidv4(),
-        title: 'Yeni Sohbet',
-        messages: [],
-        createdAt: Date.now(),
-      },
-    ];
-  });
-
-  const [activeId, setActiveId] = useState<string>(() => {
-    const saved = localStorage.getItem('kuantist_sessions_v2');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      return parsed?.[0]?.id ?? '';
-    }
-    return '';
-  });
-
+  const [sessions, setSessions] = useState<ChatSession[]>(readSessions);
+  const [activeId, setActiveId] = useState<string>(() => readSessions()[0]?.id ?? '');
   const [input, setInput] = useState('');
   const [theme, setTheme] = useState<ThemeId>('cyan');
+  const [appearance, setAppearance] = useState<AppearanceMode>('midnight');
+  const [compactMode, setCompactMode] = useState(false);
   const [personality, setPersonality] = useState<Personality>(PERSONALITIES[0]);
+  const [activeView, setActiveView] = useState<StudioView>('home');
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => window.innerWidth >= 768);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -266,9 +360,19 @@ const App: React.FC = () => {
 
   const activeSession = sessions.find((s) => s.id === activeId) ?? sessions[0];
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const themeConf = THEMES[theme];
+  const appearanceConf = APPEARANCE_MODES[appearance];
+
+  const engineLabel = useMemo(() => {
+    if (assistantEngine === 'openai') return 'OpenAI Core';
+    if (assistantEngine === 'pollinations') return 'Ücretsiz AI';
+    if (assistantEngine === 'bytez') return 'Bytez yedek';
+    return 'Demo yardımcı';
+  }, [assistantEngine]);
 
   useEffect(() => {
-    localStorage.setItem('kuantist_sessions_v2', JSON.stringify(sessions));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
   }, [sessions]);
 
   useEffect(() => {
@@ -281,7 +385,7 @@ const App: React.FC = () => {
     if (chatScrollRef.current) {
       chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
     }
-  }, [activeSession?.messages.length, isProcessing]);
+  }, [activeSession?.messages.length, isProcessing, activeView]);
 
   useEffect(() => {
     const recentSources =
@@ -289,25 +393,12 @@ const App: React.FC = () => {
     setLastSources(recentSources);
   }, [activeId, activeSession?.messages.length]);
 
-  const themeConf = THEMES[theme];
-  const engineLabel =
-    assistantEngine === 'openai'
-      ? 'OpenAI Core'
-      : assistantEngine === 'pollinations'
-        ? 'Ücretsiz AI'
-      : assistantEngine === 'bytez'
-        ? 'Bytez yedek'
-        : 'Demo yardımcı';
-
   const addLog = (message: string) => {
     setLogs((prev) => [
       {
         id: uuidv4(),
         message,
-        time: new Date().toLocaleTimeString('tr-TR', {
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
+        time: new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
       },
       ...prev.slice(0, 40),
     ]);
@@ -318,51 +409,48 @@ const App: React.FC = () => {
     if (!targetId) return;
 
     setSessions((prev) =>
-      prev.map((s) => {
-        if (s.id !== targetId) return s;
-        const newMessages = updater(s.messages);
-        const newTitle =
-          s.messages.length === 0 && newMessages[0]
-            ? newMessages[0].content.slice(0, 32) + (newMessages[0].content.length > 32 ? '…' : '')
-            : s.title;
-        return { ...s, messages: newMessages, title: newTitle };
+      prev.map((session) => {
+        if (session.id !== targetId) return session;
+        const nextMessages = updater(session.messages);
+        const nextTitle =
+          session.messages.length === 0 && nextMessages[0]
+            ? nextMessages[0].content.slice(0, 34) + (nextMessages[0].content.length > 34 ? '…' : '')
+            : session.title;
+        return { ...session, title: nextTitle, messages: nextMessages };
       }),
     );
-    if (activeId !== targetId) setActiveId(targetId);
+    setActiveView('chat');
   };
 
   const handleNewChat = () => {
-    const next: ChatSession = {
-      id: uuidv4(),
-      title: 'Yeni Sohbet',
-      messages: [],
-      createdAt: Date.now(),
-    };
+    const next = createSession();
     setSessions((prev) => [next, ...prev]);
     setActiveId(next.id);
+    setActiveView('chat');
     if (window.innerWidth < 768) setIsSidebarOpen(false);
   };
 
-  const handleDeleteChat = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
+  const handleDeleteChat = (event: React.MouseEvent, id: string) => {
+    event.stopPropagation();
+    const remaining = sessions.filter((session) => session.id !== id);
 
-    const remaining = sessions.filter((s) => s.id !== id);
-    setSessions(remaining);
-
-    if (id === activeId) {
-      if (remaining.length === 0) {
-        const fresh: ChatSession = {
-          id: uuidv4(),
-          title: 'Yeni Sohbet',
-          messages: [],
-          createdAt: Date.now(),
-        };
-        setSessions([fresh]);
-        setActiveId(fresh.id);
-      } else {
-        setActiveId(remaining[0].id);
-      }
+    if (!remaining.length) {
+      const fresh = createSession();
+      setSessions([fresh]);
+      setActiveId(fresh.id);
+      return;
     }
+
+    setSessions(remaining);
+    if (id === activeId) setActiveId(remaining[0].id);
+  };
+
+  const selectPrompt = (prompt: string, image = false) => {
+    setInput(prompt);
+    setImageMode(image);
+    setActiveView('chat');
+    requestAnimationFrame(() => textareaRef.current?.focus());
+    if (window.innerWidth < 768) setIsSidebarOpen(false);
   };
 
   const sendMessage = async () => {
@@ -370,6 +458,8 @@ const App: React.FC = () => {
 
     const content = input.trim();
     setInput('');
+    setActiveView('chat');
+    requestAnimationFrame(() => textareaRef.current?.focus());
 
     const userMsg: Message = {
       id: uuidv4(),
@@ -381,63 +471,57 @@ const App: React.FC = () => {
 
     updateActiveMessages((prev) => [...prev, userMsg]);
 
+    const lowerContent = content.toLocaleLowerCase('tr-TR');
     const wantsImage =
       imageMode ||
-      content.toLowerCase().includes('resim çiz') ||
-      content.toLowerCase().includes('görsel oluştur') ||
-      content.toLowerCase().startsWith('/img');
+      lowerContent.includes('resim çiz') ||
+      lowerContent.includes('görsel oluştur') ||
+      lowerContent.startsWith('/img');
 
     setIsProcessing(true);
 
     try {
       if (wantsImage) {
-        addLog('🎨 Görsel oluşturma isteği alındı');
+        addLog('Görsel hazırlanıyor');
 
         const prompt =
           content
             .replace(/^\/img/i, '')
             .replace(/resim çiz/gi, '')
             .replace(/görsel oluştur/gi, '')
-            .trim() || 'detaylı, sinematik bir illüstrasyon';
+            .trim() || 'detaylı, sinematik bir AI stüdyo illüstrasyonu';
 
         const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(
           prompt,
         )}?width=1024&height=1024&nologo=true`;
 
-        await new Promise((r) => setTimeout(r, 1600));
+        await new Promise((resolve) => setTimeout(resolve, 1400));
 
         const aiMsg: Message = {
           id: uuidv4(),
           role: 'assistant',
           type: 'image',
-          content: 'İstediğin tarza uygun bir görsel oluşturdum. İstersen komutu daha detaylı verip yeniden deneyebilirsin.',
+          content: 'Görsel hazır. İstersen promptu daha keskin bir stile çevirip yeniden deneyebilirim.',
           imageUrl,
           createdAt: Date.now(),
         };
 
         updateActiveMessages((prev) => [...prev, aiMsg]);
-        addLog('✅ Görsel hazır');
+        addLog('Görsel hazır');
         return;
       }
 
       const searchContext = '';
-
       const textMessages = [
         ...activeSession.messages
-          .filter((m) => m.type !== 'image')
-          .map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-        {
-          role: 'user' as const,
-          content,
-        },
+          .filter((message) => message.type !== 'image')
+          .map((message) => ({ role: message.role, content: message.content })),
+        { role: 'user' as const, content },
       ];
 
       try {
-        addLog('Kuantist Core ile yanit hazirlaniyor...');
-        const { answer, model, sources, usedWeb } = await callKuantistAssistant(
+        addLog(webAssistEnabled ? 'Kuvin canlı kaynaklarla düşünüyor' : 'Kuvin düşünüyor');
+        const { answer, model, sources, usedWeb } = await callKuvinAssistant(
           textMessages,
           personality.id,
           searchContext,
@@ -460,660 +544,870 @@ const App: React.FC = () => {
         setAssistantEngine(
           model === 'local-demo' ? 'offline' : model === 'pollinations' ? 'pollinations' : 'openai',
         );
-        addLog(usedWeb ? 'Web kaynaklariyla yanit gonderildi' : 'Kuantist Core yaniti gonderildi');
+        addLog(usedWeb ? 'Kaynaklı yanıt gönderildi' : 'Kuvin Core yanıtı gönderildi');
         return;
-      } catch (err) {
-        console.warn(err);
-        addLog('Kuantist Core kullanilamadi, Bytez yedegine geciliyor');
+      } catch (error) {
+        console.warn(error);
+        addLog('Kuvin Core yoğun, yedek motor deneniyor');
       }
 
       if (!BYTEZ_API_KEY || !bytezModel) {
         setAssistantEngine('offline');
-        addLog('Model anahtari bulunamadi');
-        const fallback: Message = {
-          id: uuidv4(),
-          role: 'assistant',
-          content:
-            'Kuantist Core icin Vercel ortaminda OPENAI_API_KEY, yedek motor icin VITE_BYTEZ_API_KEY tanimli olmali.',
-          createdAt: Date.now(),
-        };
-        updateActiveMessages((prev) => [...prev, fallback]);
+        addLog('Model anahtarı bulunamadı');
+        updateActiveMessages((prev) => [
+          ...prev,
+          {
+            id: uuidv4(),
+            role: 'assistant',
+            content:
+              'Kuvin Core için Vercel ortamında OPENAI_API_KEY, yedek motor için VITE_BYTEZ_API_KEY tanımlı olmalı.',
+            createdAt: Date.now(),
+          },
+        ]);
         return;
       }
 
-      addLog('🤖 Bytez ile yanıt hazırlanıyor…');
-
-      const messagesForModel = [
-        {
-          role: 'system',
-          content: personality.systemPrompt + searchContext,
-        },
+      addLog('Bytez ile yanıt hazırlanıyor');
+      const { error, output } = await bytezModel.run([
+        { role: 'system', content: personality.systemPrompt + searchContext },
         ...textMessages,
-      ];
-
-      const { error, output } = await bytezModel.run(messagesForModel as any);
+      ] as any);
 
       if (error) {
         console.error(error);
-        addLog('❌ Bytez model hatası');
-        const failMsg: Message = {
-          id: uuidv4(),
-          role: 'assistant',
-          content: 'Model tarafında bir hata oluştu. Lütfen tekrar dene.',
-          createdAt: Date.now(),
-          type: 'text',
-        };
-        updateActiveMessages((prev) => [...prev, failMsg]);
+        addLog('Bytez model hatası');
+        updateActiveMessages((prev) => [
+          ...prev,
+          {
+            id: uuidv4(),
+            role: 'assistant',
+            content: 'Bağlantı yoğun, tekrar deneyebilirsin.',
+            createdAt: Date.now(),
+            type: 'text',
+          },
+        ]);
         return;
       }
 
-      const answer = extractBytezText(output) || 'Bir şeyler ters gitti, yanıt oluşturulamadı.';
-
-      const aiMsg: Message = {
-        id: uuidv4(),
-        role: 'assistant',
-        content: answer,
-        createdAt: Date.now(),
-        type: 'text',
-      };
-
-      updateActiveMessages((prev) => [...prev, aiMsg]);
+      updateActiveMessages((prev) => [
+        ...prev,
+        {
+          id: uuidv4(),
+          role: 'assistant',
+          content: extractBytezText(output) || 'Bir şeyler ters gitti, yanıt oluşturulamadı.',
+          createdAt: Date.now(),
+          type: 'text',
+        },
+      ]);
       setAssistantEngine('bytez');
-      addLog('✅ Yanıt gönderildi');
-    } catch (err) {
-      console.error(err);
-      addLog('❌ Beklenmeyen bir hata oluştu');
-
-      const fail: Message = {
-        id: uuidv4(),
-        role: 'assistant',
-        content: 'Bir hata oluştu, kısa bir süre sonra tekrar dener misin?',
-        createdAt: Date.now(),
-        type: 'text',
-      };
-
-      updateActiveMessages((prev) => [...prev, fail]);
+      addLog('Yanıt gönderildi');
+    } catch (error) {
+      console.error(error);
+      addLog('Beklenmeyen bir hata oluştu');
+      updateActiveMessages((prev) => [
+        ...prev,
+        {
+          id: uuidv4(),
+          role: 'assistant',
+          content: 'Bağlantı yoğun, tekrar deneyebilirsin.',
+          createdAt: Date.now(),
+          type: 'text',
+        },
+      ]);
     } finally {
       setIsProcessing(false);
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
       if (!isProcessing) sendMessage();
     }
   };
 
-  const isEmpty = !activeSession?.messages.length;
-
-  return (
-    <div
-      className={cn(
-        'h-screen w-screen max-w-full flex overflow-hidden bg-gradient-to-br text-slate-900',
-        themeConf.gradient,
-      )}
-    >
-      <AnimatePresence initial={false}>
-        {isSidebarOpen && (
-          <motion.aside
-            initial={{ x: -40, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: -40, opacity: 0 }}
-            transition={{ type: 'spring', stiffness: 260, damping: 24 }}
-            className="relative z-20 flex h-full w-72 flex-col border-r border-slate-200/70 bg-white/90 backdrop-blur-xl shadow-xl"
+  const renderPromptGrid = (items = PROMPTS) => (
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {items.map((prompt) => {
+        const Icon = prompt.icon;
+        return (
+          <button
+            key={prompt.title}
+            onClick={() => selectPrompt(prompt.text, prompt.image)}
+            className="group min-h-28 rounded-lg border border-white/10 bg-white/[0.045] p-4 text-left text-slate-200 shadow-sm transition hover:border-cyan-300/45 hover:bg-white/[0.075]"
           >
-            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-              <div className="flex items-center gap-2">
-                <KuantistLogo className="h-9 w-9 rounded-xl shadow-md" />
-                <div>
-                  <div className="text-sm font-semibold leading-tight">Kuantist Panel</div>
-                  <div className="text-[11px] text-slate-400">Akıllı sohbet & görsel stüdyo</div>
-                </div>
-              </div>
+            <span className="mb-3 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-slate-950/70 text-cyan-200">
+              <Icon size={18} />
+            </span>
+            <span className="block text-sm font-semibold text-white">{prompt.title}</span>
+            <span className="mt-1 block text-xs leading-relaxed text-slate-400">{prompt.text}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
 
-              <button
-                onClick={() => setIsSidebarOpen(false)}
-                className="inline-flex rounded-xl p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 md:hidden"
-              >
-                <X size={18} />
-              </button>
+  const renderHome = () => (
+    <SectionShell>
+      <section className={cn('rounded-lg border border-white/10 bg-white/[0.045] p-5 md:p-7', themeConf.glow)}>
+        <div className="grid gap-6 lg:grid-cols-[1.1fr_.9fr]">
+          <div className="flex flex-col justify-center gap-5">
+            <div className="inline-flex w-fit items-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-300/10 px-3 py-1.5 text-xs font-semibold text-cyan-100">
+              <Sparkles size={14} /> Think Beyond
             </div>
-
-            <div className="border-b border-slate-100 px-4 py-3">
-              <button
-                onClick={handleNewChat}
-                className={cn(
-                  'flex w-full items-center justify-center gap-2 rounded-2xl px-3 py-2.5 text-sm font-medium text-white shadow-md transition',
-                  themeConf.primary,
-                  'hover:opacity-90',
-                )}
-              >
-                <Plus size={16} />
-                Yeni sohbet
-              </button>
+            <div>
+              <h1 className="max-w-3xl text-3xl font-semibold leading-tight text-white md:text-5xl">
+                Kuvin AI ile düşün, üret, tasarla.
+              </h1>
+              <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 md:text-base">
+                Akıllı sohbet, görsel üretim, canlı web araştırması ve yaratıcı asistan özelliklerini tek bir modern
+                stüdyoda birleştir.
+              </p>
             </div>
-
-            <div className="flex-1 overflow-y-auto px-3 py-3 space-y-1 scrollbar-thin">
-              <div className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                Sohbetler
-              </div>
-
-              {sessions.map((s) => {
-                const isActive = s.id === activeId;
-                return (
-                  <button
-                    key={s.id}
-                    onClick={() => {
-                      setActiveId(s.id);
-                      if (window.innerWidth < 768) setIsSidebarOpen(false);
-                    }}
-                    className={cn(
-                      'group flex w-full items-center justify-between rounded-2xl px-3 py-2 text-left text-xs transition',
-                      isActive
-                        ? 'bg-slate-900 text-slate-50 shadow-sm'
-                        : 'text-slate-600 hover:bg-slate-100',
-                    )}
-                  >
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                      <div
-                        className={cn(
-                          'flex h-7 w-7 items-center justify-center rounded-xl text-[11px]',
-                          isActive ? 'bg-slate-800 text-slate-50' : 'bg-slate-100 text-slate-500',
-                        )}
-                      >
-                        <MessageSquare size={14} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-[12px] font-medium">{s.title}</div>
-                        <div className="truncate text-[10px] text-slate-400">
-                          {new Date(s.createdAt).toLocaleDateString('tr-TR', {
-                            day: '2-digit',
-                            month: '2-digit',
-                          })}
-                        </div>
-                      </div>
-                    </div>
-
-                    {sessions.length > 1 && (
-                      <button
-                        onClick={(e) => handleDeleteChat(e, s.id)}
-                        className="ml-1 hidden rounded-xl p-1 text-slate-400 transition hover:bg-slate-800/10 hover:text-red-500 group-hover:inline-flex"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="border-t border-slate-100 bg-slate-50/60 px-4 py-3 space-y-3">
-              <div>
-                <div className="mb-1 flex items-center justify-between text-[11px] text-slate-500">
-                  <span className="inline-flex items-center gap-1 font-semibold">
-                    <Palette size={11} /> Tema
-                  </span>
-                </div>
-                <div className="flex gap-2">
-                  {(Object.keys(THEMES) as ThemeId[]).map((t) => (
-                    <button
-                      key={t}
-                      onClick={() => setTheme(t)}
-                      className={cn(
-                        'h-6 w-6 rounded-full border-2 transition hover:scale-110',
-                        THEMES[t].primary,
-                        theme === t ? 'border-slate-900' : 'border-white/80',
-                      )}
-                    />
-                  ))}
-                </div>
-              </div>
-
+            <div className="flex flex-wrap gap-2">
               <button
-                onClick={() => setIsSettingsOpen(true)}
-                className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 py-2 text-left text-xs text-slate-600 shadow-sm transition hover:border-slate-300"
+                onClick={() => setActiveView('chat')}
+                className={cn('inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition', themeConf.button)}
               >
-                <div className="flex items-center gap-2">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-slate-900 text-slate-50 text-[11px]">
-                    <User size={14} />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-[11px] font-semibold">Kişilik</span>
-                    <span className="truncate text-[10px] text-slate-400">{personality.label}</span>
-                  </div>
-                </div>
-                <SlidersHorizontal size={14} className="text-slate-400" />
+                <MessageSquare size={16} /> Hemen başla
               </button>
-            </div>
-          </motion.aside>
-        )}
-      </AnimatePresence>
-
-      <div className="relative flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 items-center justify-between gap-2 overflow-hidden border-b border-slate-200/70 bg-white/80 px-3 shadow-sm backdrop-blur-md md:px-6">
-          <div className="flex min-w-0 items-center gap-2">
-            {!isSidebarOpen && (
               <button
-                onClick={() => setIsSidebarOpen(true)}
-                className="mr-1 inline-flex rounded-xl p-1.5 text-slate-500 transition hover:bg-slate-100 md:hidden"
+                onClick={() => {
+                  setImageMode(true);
+                  setActiveView('image');
+                }}
+                className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:border-cyan-300/50"
               >
-                <Menu size={18} />
+                <ImagePlus size={16} /> Görsel oluştur
               </button>
-            )}
-
-            <KuantistLogo className="h-8 w-8 rounded-lg md:hidden" />
-
-            <div className="flex min-w-0 flex-col">
-              <span className="truncate text-[13px] font-semibold text-slate-800">
-                {activeSession?.title || 'Sohbet'}
-              </span>
-              <span className="flex min-w-0 items-center gap-1 text-[11px] text-slate-400">
-                <span
-                  className={cn(
-                    'h-1.5 w-1.5 rounded-full',
-                    isProcessing ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500',
-                  )}
-                />
-                <span className="truncate">{isProcessing ? 'Yanıt hazırlanıyor…' : `Hazır · ${engineLabel}`}</span>
-              </span>
+              <button
+                onClick={() => setActiveView('prompts')}
+                className="inline-flex items-center gap-2 rounded-lg border border-white/12 bg-transparent px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-white/30"
+              >
+                <Layers3 size={16} /> Prompt Library
+              </button>
             </div>
           </div>
 
-          <div className="hidden flex-shrink-0 items-center gap-2 sm:flex">
-            <button
-              onClick={() => setImageMode((m) => !m)}
-              title="Görsel modu"
-              className={cn(
-                'inline-flex items-center gap-1 rounded-2xl border px-2.5 py-1.5 text-[11px] font-medium transition',
-                imageMode
-                  ? 'border-slate-800 bg-slate-900 text-slate-50'
-                  : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300',
-              )}
-            >
-              <Brush size={13} />
-              <span className="hidden sm:inline">Görsel modu</span>
-            </button>
-
-            <button
-              onClick={() => setIsSettingsOpen(true)}
-              title="Panel"
-              className="inline-flex items-center gap-1 rounded-2xl border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-600 shadow-sm transition hover:border-slate-300"
-            >
-              <Sparkles size={13} />
-              <span className="hidden sm:inline">Panel</span>
-            </button>
+          <div className="rounded-lg border border-white/10 bg-slate-950/60 p-4">
+            <KuvinLogo className="mx-auto aspect-square w-full max-w-[320px] shadow-[0_22px_80px_rgba(34,211,238,.2)]" />
+            <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
+              {['Chat', 'Vision', 'Studio'].map((label) => (
+                <div key={label} className="rounded-lg border border-white/10 bg-white/[0.045] px-2 py-3 text-slate-300">
+                  <span className="block font-semibold text-white">Kuvin</span>
+                  <span>{label}</span>
+                </div>
+              ))}
+            </div>
           </div>
-        </header>
+        </div>
+      </section>
 
-        <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-          <section className="flex min-w-0 flex-1 flex-col border-slate-100/80 bg-gradient-to-b from-white/70 to-slate-50/80">
-            <div
-              ref={chatScrollRef}
-              className="flex-1 space-y-4 overflow-y-auto px-3 py-4 scrollbar-thin md:px-8 md:py-6"
-            >
-              {isEmpty ? (
-                <div className="flex h-full w-full flex-col items-center justify-center gap-5 px-3 text-center text-slate-500">
-                  <div
-                    className={cn(
-                      'w-full max-w-[calc(100vw-3rem)] rounded-lg border border-slate-200 bg-white/95 px-5 py-5 text-left shadow-sm md:max-w-xl',
-                    )}
-                  >
-                    <div className="flex items-start gap-3">
-                      <KuantistLogo className="h-10 w-10 rounded-lg shadow-sm" />
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-semibold text-slate-900">Kuantist hazır</div>
-                        <div className="mt-1 break-words text-xs leading-relaxed text-slate-500">
-                          Web destekli araştırma, kod ve metin üretimi için hazır.
-                        </div>
-                        <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
-                          <span className="inline-flex items-center gap-1 rounded-md border border-emerald-100 bg-emerald-50 px-2 py-1 text-emerald-700">
-                            <CheckCircle2 size={12} /> Canlı web yardımı {webAssistEnabled ? 'açık' : 'kapalı'}
-                          </span>
-                          <span className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-slate-500">
-                            <Newspaper size={12} /> Kaynaklı yanıt
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {CAPABILITIES.map((item) => {
+          const Icon = item.icon;
+          return (
+            <article key={item.title} className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+              <Icon size={18} className="text-cyan-200" />
+              <h2 className="mt-3 text-sm font-semibold text-white">{item.title}</h2>
+              <p className="mt-1 text-xs leading-relaxed text-slate-400">{item.text}</p>
+            </article>
+          );
+        })}
+      </section>
 
-                  <div className="grid w-full max-w-[calc(100vw-3rem)] gap-3 md:max-w-2xl md:grid-cols-2">
-                    {[
-                      {
-                        icon: <ImagePlus size={16} />,
-                        text: 'Geleceğin şehri stilinde bir görsel oluştur',
-                      },
-                      {
-                        icon: <Globe2 size={16} />,
-                        text: 'Ara: Bugün yapay zeka haberlerinde öne çıkanlar ne?',
-                      },
-                      {
-                        icon: <User size={16} />,
-                        text: 'Kısa ve profesyonel bir e-posta taslağı yaz',
-                      },
-                      {
-                        icon: <Search size={16} />,
-                        text: 'Güncel dolar, euro ve altın piyasasını kaynaklarıyla özetle',
-                      },
-                    ].map((s, i) => (
-                      <button
-                        key={i}
-                        onClick={() => setInput(s.text)}
-                        className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white px-3 py-3 text-left text-[12px] text-slate-600 shadow-sm transition hover:border-slate-300 hover:shadow-md"
-                      >
-                        <div className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md bg-slate-900 text-slate-50">
-                          {s.icon}
-                        </div>
-                        <span>{s.text}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
-                  {activeSession.messages.map((m) => (
-                    <motion.div
-                      key={m.id}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.18 }}
-                      className={cn('flex w-full gap-2 md:gap-3', m.role === 'user' && 'flex-row-reverse')}
-                    >
-                      {m.role === 'user' ? (
-                        <div className="mt-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-[12px] text-slate-50 shadow-sm">
-                          <User size={14} />
-                        </div>
-                      ) : (
-                        <KuantistLogo className="mt-1 h-8 w-8 rounded-xl shadow-sm" />
-                      )}
+      <section>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold text-white">Örnek kullanımlar</h2>
+          <button onClick={() => setActiveView('prompts')} className="text-xs font-semibold text-cyan-200">
+            Tüm promptlar
+          </button>
+        </div>
+        {renderPromptGrid(PROMPTS.slice(0, 3))}
+      </section>
+    </SectionShell>
+  );
 
-                      <div
-                        className={cn(
-                          'max-w-[80%] md:max-w-[75%]',
-                          m.role === 'user' ? 'items-end text-right' : 'items-start text-left',
-                          'flex flex-col gap-1',
-                        )}
-                      >
-                        <div
-                          className={cn(
-                            'rounded-3xl px-3 py-2.5 text-[13px] leading-relaxed shadow-sm md:px-4 md:py-3 md:text-sm',
-                            m.role === 'user'
-                              ? 'bg-slate-900 text-slate-50'
-                              : 'border border-slate-200 bg-white text-slate-800',
-                          )}
-                        >
-                          {m.type === 'image' && m.imageUrl ? (
-                            <div className="space-y-2">
-                              <p className="text-xs md:text-[13px] text-slate-200 md:text-slate-800">
-                                {m.content}
-                              </p>
-                              <div className="overflow-hidden rounded-2xl border border-slate-800/40 md:border-slate-200">
-                                <img
-                                  src={m.imageUrl}
-                                  alt="Üretilen görsel"
-                                  className="h-auto max-h-[360px] w-full object-cover"
-                                  loading="lazy"
-                                />
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="prose prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:bg-slate-900/90 prose-pre:p-3 prose-pre:text-xs prose-pre:text-slate-50">
-                              <ReactMarkdown>{m.content}</ReactMarkdown>
-                            </div>
-                          )}
-                          {m.role === 'assistant' && m.sources?.length ? (
-                            <div className="mt-3 border-t border-slate-200 pt-2">
-                              <div className="mb-1.5 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                                <Globe2 size={12} /> Kaynaklar
-                              </div>
-                              <div className="grid gap-1.5">
-                                {m.sources.map((source, index) => (
-                                  <a
-                                    key={`${source.url}-${index}`}
-                                    href={source.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="group flex items-start justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-left text-[11px] leading-snug text-slate-600 transition hover:border-slate-300 hover:bg-white"
-                                  >
-                                    <span className="min-w-0">
-                                      <span className="font-medium text-slate-700">{index + 1}. {source.title}</span>
-                                      {source.snippet ? (
-                                        <span className="mt-0.5 line-clamp-2 block text-[10px] text-slate-400">
-                                          {source.snippet}
-                                        </span>
-                                      ) : null}
-                                    </span>
-                                    <ExternalLink size={12} className="mt-0.5 flex-shrink-0 text-slate-400 group-hover:text-slate-600" />
-                                  </a>
-                                ))}
-                              </div>
-                            </div>
-                          ) : null}
-                        </div>
-                        <span className="px-1 text-[10px] text-slate-400">
-                          {new Date(m.createdAt).toLocaleTimeString('tr-TR', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
-                      </div>
-                    </motion.div>
-                  ))}
+  const renderChat = () => {
+    const isEmpty = !activeSession?.messages.length;
 
-                  {isProcessing && (
-                    <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
-                      <div className="h-6 w-6 rounded-full border border-slate-300 p-1">
-                        <div className="h-full w-full animate-spin rounded-full border-2 border-slate-400 border-t-transparent" />
-                      </div>
-                      Kuantist düşünüyor…
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="border-t border-slate-200/70 bg-white/90 px-3 py-3 backdrop-blur-md md:px-8 md:py-4">
-              <div className="mx-auto flex w-full max-w-[calc(100vw-2rem)] items-end gap-2 rounded-3xl border border-slate-200 bg-slate-50/80 px-2 py-1 shadow-inner md:max-w-3xl">
-                <button
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-2xl text-slate-400 transition hover:bg-slate-200/80 hover:text-slate-700"
-                  title="Resim dosyası ekle (demosal)"
-                >
-                  <ImageIcon size={18} />
-                </button>
-
-                <textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  rows={1}
-                  placeholder={
-                    imageMode
-                      ? 'Nasıl bir görsel istiyorsun? (Örn: Gece vakti siberpunk İstanbul manzarası)'
-                      : 'Soru, komut veya metnini yaz… Enter ile gönder, Shift+Enter ile satır ekle.'
-                  }
-                  className="max-h-32 min-h-[44px] flex-1 resize-none border-0 bg-transparent px-1 py-2 text-[13px] text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0 md:text-sm"
-                />
-
-                <button
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-2xl text-slate-400 transition hover:bg-slate-200/80 hover:text-slate-700"
-                  title="Sesli giriş (arayüzsel)"
-                >
-                  <Mic size={18} />
-                </button>
-
-                <button
-                  onClick={sendMessage}
-                  disabled={!input.trim() || isProcessing}
-                  className={cn(
-                    'inline-flex h-9 w-9 items-center justify-center rounded-2xl text-white shadow-md transition',
-                    themeConf.primary,
-                    !input.trim() || isProcessing ? 'opacity-40' : 'hover:scale-105 hover:shadow-lg',
-                  )}
-                >
-                  <Send size={17} />
-                </button>
-              </div>
-
-              <div className="mx-auto mt-1 flex max-w-[calc(100vw-2rem)] items-center justify-between text-[10px] leading-snug text-slate-400 md:max-w-3xl">
-                <span className="hidden sm:inline">
-                  Kuantist; OpenAI Core, ücretsiz AI yedeği, sunucu tarafı web araştırması ve dahili görsel motoru ile çalışır. Yanıtlar hata içerebilir.
-                </span>
-                <span className="sm:hidden">Kuantist yanıtları hata içerebilir.</span>
-              </div>
-            </div>
-          </section>
-
-          <aside className="hidden w-80 flex-col border-l border-slate-200/70 bg-white/90 px-4 py-4 md:flex">
-            <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50/80 p-3 shadow-sm">
-              <div className="mb-2 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-slate-900 text-slate-50">
-                    <User size={16} />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-[12px] font-semibold text-slate-800">Kişilik</span>
-                    <span className="text-[11px] text-slate-500">{personality.label}</span>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setIsSettingsOpen(true)}
-                  className="inline-flex rounded-xl border border-slate-200 bg-white px-2 py-1 text-[10px] text-slate-500 hover:border-slate-300"
-                >
-                  Değiştir
-                </button>
-              </div>
-              <p className="text-[11px] leading-snug text-slate-500">{personality.description}</p>
-            </div>
-
-            <div className="mb-4 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="mb-2 flex items-center gap-2">
-                <KuantistLogo className="h-8 w-8 rounded-md" />
-                <div className="flex flex-col">
-                  <span className="text-[12px] font-semibold text-slate-800">Asistan çekirdeği</span>
-                  <span className="text-[11px] text-slate-500">{engineLabel}</span>
-                </div>
-              </div>
-              <div className="grid gap-2 text-[11px] text-slate-500">
-                <div className="flex items-center gap-2 rounded-md bg-slate-50 px-2 py-1.5">
-                  <ServerCog size={13} className="text-slate-400" />
-                  <span>OpenAI anahtarı Vercel API tarafında saklanır.</span>
-                </div>
-                <div className="flex items-center gap-2 rounded-md bg-slate-50 px-2 py-1.5">
-                  <ShieldCheck size={13} className="text-slate-400" />
-                  <span>OpenAI çalışmazsa ücretsiz AI yedeği devreye girer.</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="mb-4 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-900 text-slate-50">
-                    <Globe2 size={16} />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-[12px] font-semibold text-slate-800">Canlı web yardımı</span>
-                    <span className="text-[11px] text-slate-500">
-                      {webAssistEnabled ? 'Güncel sorularda kaynak arar' : 'Sadece model bilgisiyle yanıtlar'}
+    return (
+      <div
+        ref={chatScrollRef}
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-4 pb-5 scrollbar-thin md:px-8 md:py-6"
+      >
+        {isEmpty ? (
+          <div className="mx-auto flex min-h-full max-w-4xl flex-col justify-center gap-5">
+            <div className="rounded-lg border border-white/10 bg-white/[0.045] p-5 text-left">
+              <div className="flex items-start gap-3">
+                <KuvinLogo className="h-12 w-12" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-lg font-semibold text-white">Bugün ne üretmek istersin?</div>
+                  <p className="mt-2 text-sm leading-6 text-slate-300">
+                    Kuvin AI; sohbet, kod, araştırma, marka fikri ve görsel üretim için hazır.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                    <span className={cn('inline-flex items-center gap-1 rounded-lg border px-2 py-1', themeConf.chip)}>
+                      <CheckCircle2 size={12} /> Canlı web {webAssistEnabled ? 'açık' : 'kapalı'}
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.045] px-2 py-1 text-slate-300">
+                      <ShieldCheck size={12} /> Kişisel veri paylaşma
                     </span>
                   </div>
                 </div>
-                <button
-                  onClick={() => setWebAssistEnabled((enabled) => !enabled)}
+              </div>
+            </div>
+            {renderPromptGrid(PROMPTS.slice(0, 4))}
+          </div>
+        ) : (
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+            {activeSession.messages.map((message) => (
+              <motion.div
+                key={message.id}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.18 }}
+                className={cn('flex w-full gap-2 md:gap-3', message.role === 'user' && 'flex-row-reverse')}
+              >
+                {message.role === 'user' ? (
+                  <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cyan-400 text-slate-950 shadow-sm">
+                    <User size={15} />
+                  </div>
+                ) : (
+                  <KuvinLogo className="mt-1 h-8 w-8 shadow-sm" />
+                )}
+
+                <div
                   className={cn(
-                    'rounded-md border px-2 py-1 text-[10px] font-medium transition',
-                    webAssistEnabled
-                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                      : 'border-slate-200 bg-slate-50 text-slate-500',
+                    'flex max-w-[84%] flex-col gap-1 md:max-w-[76%]',
+                    message.role === 'user' ? 'items-end text-right' : 'items-start text-left',
                   )}
                 >
-                  {webAssistEnabled ? 'Açık' : 'Kapalı'}
+                  <div
+                    className={cn(
+                      'rounded-lg px-3 py-2.5 leading-relaxed shadow-sm md:px-4 md:py-3',
+                      compactMode ? 'text-xs md:text-[13px]' : 'text-[13px] md:text-sm',
+                      message.role === 'user'
+                        ? 'bg-cyan-400 text-slate-950'
+                        : 'border border-white/10 bg-white/[0.055] text-slate-100',
+                    )}
+                  >
+                    {message.type === 'image' && message.imageUrl ? (
+                      <div className="space-y-2">
+                        <p>{message.content}</p>
+                        <div className="overflow-hidden rounded-lg border border-white/10">
+                          <img
+                            src={message.imageUrl}
+                            alt="Kuvin AI tarafından üretilen görsel"
+                            className="h-auto max-h-[360px] w-full object-cover"
+                            loading="lazy"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="prose prose-sm prose-invert max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:bg-slate-950 prose-pre:p-3 prose-pre:text-xs">
+                        <ReactMarkdown>{message.content}</ReactMarkdown>
+                      </div>
+                    )}
+
+                    {message.role === 'assistant' && message.sources?.length ? (
+                      <div className="mt-3 border-t border-white/10 pt-2">
+                        <div className="mb-1.5 flex items-center gap-1 text-[10px] font-semibold uppercase text-slate-400">
+                          <Globe2 size={12} /> Kaynaklar
+                        </div>
+                        <div className="grid gap-1.5">
+                          {message.sources.map((source, index) => (
+                            <a
+                              key={`${source.url}-${index}`}
+                              href={source.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="group flex items-start justify-between gap-2 rounded-lg border border-white/10 bg-slate-950/45 px-2 py-1.5 text-left text-[11px] leading-snug text-slate-300 transition hover:border-cyan-300/40"
+                            >
+                              <span className="min-w-0">
+                                <span className="font-medium text-slate-100">
+                                  {index + 1}. {source.title}
+                                </span>
+                                {source.snippet ? (
+                                  <span className="mt-0.5 line-clamp-2 block text-[10px] text-slate-500">
+                                    {source.snippet}
+                                  </span>
+                                ) : null}
+                              </span>
+                              <ExternalLink size={12} className="mt-0.5 shrink-0 text-slate-500 group-hover:text-cyan-200" />
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                  <span className="px-1 text-[10px] text-slate-500">
+                    {new Date(message.createdAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+              </motion.div>
+            ))}
+
+            {isProcessing && (
+              <div className="mt-1 flex items-center gap-2 text-xs text-slate-400">
+                <div className="h-6 w-6 rounded-lg border border-cyan-300/30 p-1">
+                  <div className="h-full w-full animate-spin rounded-full border-2 border-cyan-300 border-t-transparent" />
+                </div>
+                {imageMode ? 'Görsel hazırlanıyor...' : 'Kuvin düşünüyor...'}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderContent = () => {
+    if (activeView === 'home') return renderHome();
+    if (activeView === 'chat') return renderChat();
+    if (activeView === 'image') {
+      return (
+        <SectionShell>
+          <div className="rounded-lg border border-white/10 bg-white/[0.045] p-5">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h1 className="text-2xl font-semibold text-white">Kuvin Vision</h1>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+                  Görsel fikrini yaz, Kuvin bunu prompta çevirip hızlı bir konsept görsele dönüştürsün.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setImageMode(true);
+                  setActiveView('chat');
+                }}
+                className={cn('inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition', themeConf.button)}
+              >
+                <Brush size={16} /> Studio modunu aç
+              </button>
+            </div>
+          </div>
+          {renderPromptGrid(PROMPTS.filter((prompt) => prompt.image))}
+        </SectionShell>
+      );
+    }
+    if (activeView === 'prompts') {
+      return (
+        <SectionShell>
+          <div>
+            <h1 className="text-2xl font-semibold text-white">Prompt Library</h1>
+            <p className="mt-2 text-sm leading-6 text-slate-300">
+              Hazır komutlarla daha hızlı başla; sohbet, görsel, kod ve marka üretimi için seç.
+            </p>
+          </div>
+          {renderPromptGrid()}
+        </SectionShell>
+      );
+    }
+    if (activeView === 'pricing') {
+      return (
+        <SectionShell>
+          <div>
+            <h1 className="text-2xl font-semibold text-white">Planlar</h1>
+            <p className="mt-2 text-sm text-slate-300">Kuvin AI şu anda test aşamasında; büyüdükçe planlar açılabilir.</p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            {PLANS.map((plan) => (
+              <article key={plan.name} className="rounded-lg border border-white/10 bg-white/[0.045] p-4">
+                <h2 className="text-sm font-semibold text-white">{plan.name}</h2>
+                <div className="mt-2 text-2xl font-semibold text-cyan-100">{plan.price}</div>
+                <p className="mt-3 text-xs leading-6 text-slate-400">{plan.text}</p>
+              </article>
+            ))}
+          </div>
+          <div className="rounded-lg border border-cyan-300/25 bg-cyan-300/10 p-4 text-sm leading-6 text-cyan-50">
+            Marka için en güçlü alan adları: kuvin.ai, kuvin.app, kuvin.studio veya kuvinlabs.com.
+          </div>
+        </SectionShell>
+      );
+    }
+    if (activeView === 'about') {
+      return (
+        <SectionShell>
+          <article className="rounded-lg border border-white/10 bg-white/[0.045] p-5">
+            <KuvinLogo className="h-14 w-14" />
+            <h1 className="mt-4 text-2xl font-semibold text-white">Kuvin AI</h1>
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-300">
+              Kuvin AI, sohbet ve görsel üretimi tek stüdyo akışında birleştiren modern bir yapay zeka platformudur.
+              Think Beyond yaklaşımıyla hızlı düşünme, üretme, tasarlama ve araştırma desteği verir.
+            </p>
+          </article>
+          <div className="grid gap-3 md:grid-cols-3">
+            {['API anahtarları sunucuda saklanır.', 'Kişisel verilerini paylaşmaman önerilir.', 'Güncel yanıtlarda kaynaklar gösterilir.'].map(
+              (text) => (
+                <div key={text} className="rounded-lg border border-white/10 bg-white/[0.04] p-4 text-sm text-slate-300">
+                  <ShieldCheck size={18} className="mb-3 text-cyan-200" />
+                  {text}
+                </div>
+              ),
+            )}
+          </div>
+        </SectionShell>
+      );
+    }
+    return (
+      <SectionShell>
+        <div className="rounded-lg border border-white/10 bg-white/[0.045] p-5">
+          <h1 className="text-2xl font-semibold text-white">Contact / Feedback</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+            Geri bildirim, hata raporu veya yeni özellik fikri için kısa notunu sohbete yazabilirsin. Kuvin bunu ürün
+            planına çevirebilir.
+          </p>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            {['Hata bildir', 'Özellik öner', 'Tasarım fikri ver'].map((text) => (
+              <button
+                key={text}
+                onClick={() => selectPrompt(`${text}: Kuvin AI için şu konuda destek istiyorum...`)}
+                className="rounded-lg border border-white/10 bg-slate-950/45 px-3 py-3 text-left text-sm text-slate-200 transition hover:border-cyan-300/40"
+              >
+                {text}
+              </button>
+            ))}
+          </div>
+        </div>
+      </SectionShell>
+    );
+  };
+
+  return (
+    <div className="h-[100dvh] w-screen max-w-full overflow-hidden overscroll-none bg-slate-950 text-slate-100">
+      <div className={cn('flex h-full min-h-0', appearanceConf.app)}>
+        <AnimatePresence initial={false}>
+          {isSidebarOpen && (
+            <motion.aside
+              initial={{ x: -40, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: -40, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 260, damping: 24 }}
+              className={cn(
+                'relative z-20 flex h-full w-72 shrink-0 flex-col border-r border-white/10 shadow-2xl backdrop-blur-xl',
+                appearanceConf.sidebar,
+              )}
+            >
+              <div className="flex items-center justify-between border-b border-white/10 px-4 py-4">
+                <div className="flex items-center gap-3">
+                  <KuvinLogo className="h-10 w-10 shadow-[0_10px_30px_rgba(34,211,238,.22)]" />
+                  <div>
+                    <div className="text-sm font-semibold leading-tight text-white">Kuvin AI</div>
+                    <div className="text-[11px] text-cyan-100/75">Think Beyond</div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsSidebarOpen(false)}
+                  className="inline-flex rounded-lg p-1.5 text-slate-400 transition hover:bg-white/10 hover:text-white md:hidden"
+                  aria-label="Menüyü kapat"
+                >
+                  <X size={18} />
                 </button>
               </div>
 
-              <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
-                <div className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                  <span className="inline-flex items-center gap-1">
-                    <Newspaper size={11} /> Son kaynaklar
-                  </span>
-                  <span>{lastSources.length || 0}/5</span>
-                </div>
-                {lastSources.length ? (
-                  <div className="max-h-32 space-y-1 overflow-y-auto pr-1 scrollbar-thin">
-                    {lastSources.map((source, index) => (
-                      <a
-                        key={`${source.url}-${index}`}
-                        href={source.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center justify-between gap-2 rounded-md px-1.5 py-1 text-[11px] text-slate-600 transition hover:bg-white"
+              <nav className="space-y-1 px-3 py-3">
+                {VIEWS.map((view) => {
+                  const Icon = view.icon;
+                  const active = activeView === view.id;
+                  return (
+                    <button
+                      key={view.id}
+                      onClick={() => {
+                        setActiveView(view.id);
+                        if (view.id === 'image') setImageMode(true);
+                        if (window.innerWidth < 768) setIsSidebarOpen(false);
+                      }}
+                      className={cn(
+                        'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold transition',
+                        active ? 'bg-cyan-300 text-slate-950' : 'text-slate-400 hover:bg-white/10 hover:text-white',
+                      )}
+                    >
+                      <Icon size={15} />
+                      {view.label}
+                    </button>
+                  );
+                })}
+              </nav>
+
+              <div className="border-y border-white/10 px-4 py-3">
+                <button
+                  onClick={handleNewChat}
+                  className={cn('flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-semibold transition', themeConf.button)}
+                >
+                  <Plus size={16} />
+                  Yeni sohbet
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-3 py-3 scrollbar-thin">
+                <div className="px-1 pb-2 text-[11px] font-semibold uppercase text-slate-500">Sohbetler</div>
+                <div className="space-y-1">
+                  {sessions.map((session) => {
+                    const active = session.id === activeId && activeView === 'chat';
+                    return (
+                      <div
+                        key={session.id}
+                        className={cn(
+                          'group flex items-center gap-2 rounded-lg px-2 py-2 transition',
+                          active ? 'bg-white/10 text-white' : 'text-slate-400 hover:bg-white/10 hover:text-slate-100',
+                        )}
                       >
-                        <span className="truncate">{source.title}</span>
-                        <ExternalLink size={11} className="flex-shrink-0 text-slate-400" />
-                      </a>
+                        <button
+                          onClick={() => {
+                            setActiveId(session.id);
+                            setActiveView('chat');
+                            if (window.innerWidth < 768) setIsSidebarOpen(false);
+                          }}
+                          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                        >
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-900 text-cyan-100">
+                            <MessageSquare size={14} />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-xs font-semibold">{session.title}</span>
+                            <span className="block text-[10px] text-slate-500">
+                              {new Date(session.createdAt).toLocaleDateString('tr-TR', {
+                                day: '2-digit',
+                                month: '2-digit',
+                              })}
+                            </span>
+                          </span>
+                        </button>
+                        {sessions.length > 1 ? (
+                          <button
+                            onClick={(event) => handleDeleteChat(event, session.id)}
+                            className="hidden rounded-lg p-1 text-slate-500 transition hover:bg-red-500/10 hover:text-red-300 group-hover:inline-flex"
+                            aria-label="Sohbeti sil"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-3 border-t border-white/10 px-4 py-3">
+                <div>
+                  <div className="mb-2 text-[11px] font-semibold text-slate-500">Vurgu rengi</div>
+                  <div className="flex gap-2">
+                    {(Object.keys(THEMES) as ThemeId[]).map((item) => (
+                      <button
+                        key={item}
+                        onClick={() => setTheme(item)}
+                        className={cn(
+                          'h-6 w-6 rounded-lg border transition hover:scale-105',
+                          THEMES[item].dot,
+                          theme === item ? 'border-white' : 'border-white/20',
+                        )}
+                        aria-label={`${THEMES[item].label} tema`}
+                      />
                     ))}
                   </div>
-                ) : (
-                  <p className="text-[11px] leading-snug text-slate-500">
-                    Haber, fiyat, hava durumu veya "Ara:" ile başlayan sorularda kaynaklar burada görünür.
-                  </p>
-                )}
+                </div>
+                <button
+                  onClick={() => setCompactMode((value) => !value)}
+                  className={cn(
+                    'flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-xs transition',
+                    compactMode
+                      ? 'border-cyan-300 bg-cyan-300 text-slate-950'
+                      : 'border-white/10 bg-white/[0.045] text-slate-300 hover:border-cyan-300/35',
+                  )}
+                >
+                  <span className="flex items-center gap-2">
+                    <Layers3 size={14} /> Sıkı chat modu
+                  </span>
+                  <span className="text-[10px]">{compactMode ? 'Açık' : 'Kapalı'}</span>
+                </button>
+                <button
+                  onClick={() => setIsSettingsOpen(true)}
+                  className="flex w-full items-center justify-between rounded-lg border border-white/10 bg-white/[0.045] px-3 py-2 text-left text-xs text-slate-300 transition hover:border-cyan-300/35"
+                >
+                  <span className="flex items-center gap-2">
+                    <User size={14} /> {personality.label}
+                  </span>
+                  <SlidersHorizontal size={14} className="text-slate-500" />
+                </button>
+              </div>
+            </motion.aside>
+          )}
+        </AnimatePresence>
+
+        <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col">
+          <header
+            className={cn(
+              'flex min-h-16 shrink-0 items-center justify-between gap-2 border-b border-white/10 px-3 backdrop-blur-xl md:px-6',
+              appearanceConf.header,
+            )}
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              {!isSidebarOpen && (
+                <button
+                  onClick={() => setIsSidebarOpen(true)}
+                  className="mr-1 inline-flex rounded-lg p-1.5 text-slate-400 transition hover:bg-white/10 hover:text-white"
+                  aria-label="Menüyü aç"
+                >
+                  <Menu size={18} />
+                </button>
+              )}
+              <KuvinLogo className="h-8 w-8 md:hidden" />
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-white">
+                  {VIEWS.find((view) => view.id === activeView)?.label || 'Kuvin AI'}
+                </div>
+                <div className="flex min-w-0 items-center gap-1 text-[11px] text-slate-400">
+                  <span className={cn('h-1.5 w-1.5 rounded-full', isProcessing ? 'animate-pulse bg-amber-300' : 'bg-emerald-400')} />
+                  <span className="truncate">{isProcessing ? 'Kuvin hazırlanıyor...' : `Hazır · ${engineLabel}`}</span>
+                </div>
               </div>
             </div>
 
-            <div className="mb-4 space-y-2 text-[11px]">
-              <div className="text-[11px] font-semibold text-slate-500">Hızlı ayarlar</div>
-
+            <div className="hidden items-center gap-2 sm:flex">
               <button
-                onClick={() => setImageMode((m) => !m)}
+                onClick={() => setImageMode((value) => !value)}
+                title="Görsel modu"
                 className={cn(
-                  'flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition',
+                  'inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition',
                   imageMode
-                    ? 'border-slate-800 bg-slate-900 text-slate-50'
-                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300',
+                    ? 'border-cyan-300 bg-cyan-300 text-slate-950'
+                    : 'border-white/10 bg-white/[0.045] text-slate-300 hover:border-cyan-300/40',
                 )}
               >
-                <span className="inline-flex items-center gap-2">
-                  <ImagePlus size={14} /> Görsel modu
-                </span>
-                <span className="text-[10px] text-slate-400">{imageMode ? 'Aktif' : 'Pasif'}</span>
+                <Brush size={13} />
+                <span>Görsel modu</span>
               </button>
-
               <button
-                onClick={handleNewChat}
-                className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-slate-600 transition hover:border-slate-300"
+                onClick={() => setIsSettingsOpen(true)}
+                title="Panel"
+                className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.045] px-2.5 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-cyan-300/40"
               >
-                <span className="inline-flex items-center gap-2">
-                  <MessageSquare size={14} /> Yeni konu başlat
-                </span>
+                <Sparkles size={13} />
+                <span>Panel</span>
               </button>
             </div>
+          </header>
 
-            <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-slate-200 bg-slate-50/80 p-3 text-[11px]">
-              <div className="mb-2 flex items-center justify-between text-slate-500">
-                <span className="inline-flex items-center gap-1 font-semibold">
-                  <Terminal size={12} /> Sistem akışı
-                </span>
-                <span className="text-[10px] text-slate-400">Son {logs.length || 0} olay</span>
-              </div>
-              <div className="flex-1 overflow-y-auto rounded-md bg-slate-900 p-2 text-[10px] text-emerald-300 scrollbar-thin">
-                {logs.length === 0 ? (
-                  <div className="text-slate-500">Henüz log yok. İlk isteğini gönder.</div>
-                ) : (
-                  logs.map((l) => (
-                    <div
-                      key={l.id}
-                      className="mb-1.5 border-b border-slate-800 pb-1 last:border-0 last:pb-0"
-                    >
-                      <span className="text-slate-500">[{l.time}] </span>
-                      <span>{l.message}</span>
-                    </div>
-                  ))
+          <div className="flex min-h-0 flex-1 md:flex-row">
+            <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-[linear-gradient(180deg,rgba(15,23,42,.44),rgba(2,6,23,.18))]">
+              <div
+                className={cn(
+                  'min-h-0 flex-1 scrollbar-thin',
+                  activeView === 'chat' ? 'flex flex-col overflow-hidden' : 'overflow-y-auto',
                 )}
+              >
+                {renderContent()}
               </div>
-            </div>
-          </aside>
+
+              <div
+                className={cn(
+                  'shrink-0 border-t border-white/10 px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur-xl md:px-8 md:py-4',
+                  appearanceConf.composer,
+                )}
+              >
+                <div className="mx-auto flex w-full max-w-[calc(100vw-2rem)] items-end gap-2 rounded-lg border border-white/10 bg-white/[0.055] px-2 py-1 shadow-inner md:max-w-3xl">
+                  <button
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white/10 hover:text-white"
+                    title="Görsel dosyası"
+                  >
+                    <ImageIcon size={18} />
+                  </button>
+
+                  <textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={(event) => setInput(event.target.value)}
+                    onKeyDown={handleKeyDown}
+                    rows={1}
+                    placeholder={imageMode ? 'Nasıl bir görsel istiyorsun?' : 'Bugün ne üretmek istersin?'}
+                    className={cn(
+                      'max-h-28 min-h-[46px] flex-1 resize-none border-0 bg-transparent px-1 py-2 text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-0',
+                      compactMode ? 'text-xs' : 'text-sm',
+                    )}
+                  />
+
+                  <button
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white/10 hover:text-white"
+                    title="Sesli giriş"
+                  >
+                    <Mic size={18} />
+                  </button>
+
+                  <button
+                    onClick={sendMessage}
+                    disabled={!input.trim() || isProcessing}
+                    className={cn(
+                      'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg font-semibold shadow-md transition',
+                      themeConf.button,
+                      !input.trim() || isProcessing ? 'cursor-not-allowed opacity-40' : 'hover:scale-105',
+                    )}
+                    aria-label="Gönder"
+                  >
+                    <Send size={18} />
+                  </button>
+                </div>
+
+                <div className="mx-auto mt-2 flex max-w-[calc(100vw-2rem)] items-center justify-between gap-2 text-[10px] leading-snug text-slate-500 md:max-w-3xl">
+                  <span className="hidden sm:inline">
+                    Kuvin AI; OpenAI Core, canlı web araştırması, yedek AI motoru ve görsel üretim akışıyla çalışır.
+                  </span>
+                  <span>Kişisel verilerini paylaşma.</span>
+                </div>
+              </div>
+            </section>
+
+            <aside
+              className={cn(
+                'hidden w-80 shrink-0 flex-col border-l border-white/10 px-4 py-4 backdrop-blur-xl md:flex',
+                appearanceConf.sidebar,
+              )}
+            >
+              <div className="mb-3 rounded-lg border border-white/10 bg-white/[0.045] p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-300 text-slate-950">
+                      <User size={16} />
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-xs font-semibold text-white">Kişilik</span>
+                      <span className="text-[11px] text-slate-400">{personality.label}</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setIsSettingsOpen(true)}
+                    className="rounded-lg border border-white/10 bg-slate-950 px-2 py-1 text-[10px] text-slate-300 transition hover:border-cyan-300/40"
+                  >
+                    Değiştir
+                  </button>
+                </div>
+                <p className="text-[11px] leading-snug text-slate-400">{personality.description}</p>
+              </div>
+
+              <div className="mb-3 rounded-lg border border-white/10 bg-white/[0.045] p-3">
+                <div className="mb-2 flex items-center gap-2">
+                  <KuvinLogo className="h-8 w-8" />
+                  <div className="flex flex-col">
+                    <span className="text-xs font-semibold text-white">Asistan çekirdeği</span>
+                    <span className="text-[11px] text-slate-400">{engineLabel}</span>
+                  </div>
+                </div>
+                <div className="grid gap-2 text-[11px] text-slate-400">
+                  <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-slate-950/45 px-2 py-1.5">
+                    <ServerCog size={13} className="text-cyan-200" />
+                    <span>OpenAI anahtarı Vercel API tarafında saklanır.</span>
+                  </div>
+                  <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-slate-950/45 px-2 py-1.5">
+                    <ShieldCheck size={13} className="text-cyan-200" />
+                    <span>Yanıtlar hata içerebilir; hassas veri paylaşma.</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mb-3 rounded-lg border border-white/10 bg-white/[0.045] p-3">
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-cyan-200">
+                      <Globe2 size={16} />
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-xs font-semibold text-white">Canlı web yardımı</span>
+                      <span className="text-[11px] text-slate-400">
+                        {webAssistEnabled ? 'Güncel sorularda kaynak arar' : 'Sadece model bilgisiyle yanıtlar'}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setWebAssistEnabled((enabled) => !enabled)}
+                    className={cn(
+                      'rounded-lg border px-2 py-1 text-[10px] font-semibold transition',
+                      webAssistEnabled
+                        ? 'border-emerald-300/35 bg-emerald-300/10 text-emerald-100'
+                        : 'border-white/10 bg-slate-950 text-slate-400',
+                    )}
+                  >
+                    {webAssistEnabled ? 'Açık' : 'Kapalı'}
+                  </button>
+                </div>
+
+                <div className="rounded-lg border border-white/10 bg-slate-950/45 p-2">
+                  <div className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase text-slate-500">
+                    <span className="inline-flex items-center gap-1">
+                      <Globe2 size={11} /> Son kaynaklar
+                    </span>
+                    <span>{lastSources.length || 0}/5</span>
+                  </div>
+                  {lastSources.length ? (
+                    <div className="max-h-32 space-y-1 overflow-y-auto pr-1 scrollbar-thin">
+                      {lastSources.map((source, index) => (
+                        <a
+                          key={`${source.url}-${index}`}
+                          href={source.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center justify-between gap-2 rounded-lg px-1.5 py-1 text-[11px] text-slate-400 transition hover:bg-white/10 hover:text-slate-100"
+                        >
+                          <span className="truncate">{source.title}</span>
+                          <ExternalLink size={11} className="shrink-0 text-slate-500" />
+                        </a>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] leading-snug text-slate-500">
+                      Güncel sorularda kullanılan kaynaklar burada görünür.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="mb-3 space-y-2 text-[11px]">
+                <div className="font-semibold text-slate-500">Hızlı ayarlar</div>
+                <button
+                  onClick={() => setImageMode((value) => !value)}
+                  className={cn(
+                    'flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition',
+                    imageMode
+                      ? 'border-cyan-300 bg-cyan-300 text-slate-950'
+                      : 'border-white/10 bg-white/[0.045] text-slate-300 hover:border-cyan-300/40',
+                  )}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <ImagePlus size={14} /> Görsel modu
+                  </span>
+                  <span className="text-[10px]">{imageMode ? 'Aktif' : 'Pasif'}</span>
+                </button>
+                <button
+                  onClick={handleNewChat}
+                  className="flex w-full items-center justify-between rounded-lg border border-white/10 bg-white/[0.045] px-3 py-2 text-left text-slate-300 transition hover:border-cyan-300/40"
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <MessageSquare size={14} /> Yeni konu başlat
+                  </span>
+                </button>
+              </div>
+
+              <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-white/10 bg-white/[0.045] p-3 text-[11px]">
+                <div className="mb-2 flex items-center justify-between text-slate-400">
+                  <span className="inline-flex items-center gap-1 font-semibold">
+                    <Terminal size={12} /> Sistem akışı
+                  </span>
+                  <span className="text-[10px] text-slate-500">Son {logs.length || 0} olay</span>
+                </div>
+                <div className="flex-1 overflow-y-auto rounded-lg bg-slate-950 p-2 text-[10px] text-emerald-200 scrollbar-thin">
+                  {logs.length === 0 ? (
+                    <div className="text-slate-600">İlk isteğini bekliyor.</div>
+                  ) : (
+                    logs.map((log) => (
+                      <div key={log.id} className="mb-1.5 border-b border-white/10 pb-1 last:border-0 last:pb-0">
+                        <span className="text-slate-600">[{log.time}] </span>
+                        <span>{log.message}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </aside>
+          </div>
         </div>
       </div>
 
@@ -1123,31 +1417,26 @@ const App: React.FC = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/30 backdrop-blur-sm"
+            className="fixed inset-0 z-30 flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm"
             onClick={() => setIsSettingsOpen(false)}
           >
             <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
+              initial={{ scale: 0.94, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
+              exit={{ scale: 0.94, opacity: 0 }}
               transition={{ type: 'spring', stiffness: 260, damping: 22 }}
-              onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+              className="w-full max-w-lg rounded-lg border border-white/10 bg-slate-950 shadow-2xl"
             >
-              <div
-                className={cn(
-                  'flex items-center justify-between border-b border-slate-100 px-5 py-3',
-                  'bg-gradient-to-r',
-                  themeConf.softBg,
-                )}
-              >
+              <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
                 <div>
-                  <div className="text-sm font-semibold text-slate-900">Panel ayarları</div>
-                  <div className="text-[11px] text-slate-500">Kişilik ve görünüm tercihler</div>
+                  <div className="text-sm font-semibold text-white">Kuvin panel</div>
+                  <div className="text-[11px] text-slate-500">Kişilik ve görünüm tercihleri</div>
                 </div>
                 <button
                   onClick={() => setIsSettingsOpen(false)}
-                  className="inline-flex rounded-xl p-1.5 text-slate-500 transition hover:bg-slate-100"
+                  className="inline-flex rounded-lg p-1.5 text-slate-400 transition hover:bg-white/10 hover:text-white"
+                  aria-label="Paneli kapat"
                 >
                   <X size={16} />
                 </button>
@@ -1155,29 +1444,24 @@ const App: React.FC = () => {
 
               <div className="max-h-[60vh] space-y-5 overflow-y-auto px-5 py-4 scrollbar-thin">
                 <div>
-                  <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-slate-600">
-                    <User size={13} /> Aktif kişilik
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-300">
+                    <Sparkles size={13} /> Koyu tema stili
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {PERSONALITIES.map((p) => (
+                  <div className="grid grid-cols-3 gap-2 text-[11px]">
+                    {(Object.keys(APPEARANCE_MODES) as AppearanceMode[]).map((item) => (
                       <button
-                        key={p.id}
-                        onClick={() => setPersonality(p)}
+                        key={item}
+                        onClick={() => setAppearance(item)}
                         className={cn(
-                          'flex flex-col gap-0.5 rounded-2xl border px-3 py-2 text-left text-[11px] transition',
-                          personality.id === p.id
-                            ? 'border-slate-900 bg-slate-900 text-slate-50 shadow-sm'
-                            : 'border-slate-200 bg-slate-50 hover:border-slate-300',
+                          'min-h-20 rounded-lg border px-2 py-2 text-left transition',
+                          appearance === item
+                            ? 'border-cyan-300 bg-cyan-300 text-slate-950'
+                            : 'border-white/10 bg-white/[0.045] text-slate-300 hover:border-cyan-300/40',
                         )}
                       >
-                        <span className="text-[11px] font-semibold">{p.label}</span>
-                        <span
-                          className={cn(
-                            'text-[10px]',
-                            personality.id === p.id ? 'text-slate-200' : 'text-slate-500',
-                          )}
-                        >
-                          {p.description}
+                        <span className="block font-semibold">{APPEARANCE_MODES[item].label}</span>
+                        <span className={cn('mt-1 block text-[10px]', appearance === item ? 'text-slate-800' : 'text-slate-500')}>
+                          {APPEARANCE_MODES[item].description}
                         </span>
                       </button>
                     ))}
@@ -1185,39 +1469,96 @@ const App: React.FC = () => {
                 </div>
 
                 <div>
-                  <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-slate-600">
-                    <Palette size={13} /> Renk teması
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-300">
+                    <User size={13} /> Aktif kişilik
                   </div>
-                  <div className="grid grid-cols-3 gap-2 text-[11px]">
-                    {(Object.keys(THEMES) as ThemeId[]).map((t) => (
+                  <div className="grid grid-cols-2 gap-2">
+                    {PERSONALITIES.map((item) => (
                       <button
-                        key={t}
-                        onClick={() => setTheme(t)}
+                        key={item.id}
+                        onClick={() => setPersonality(item)}
                         className={cn(
-                          'flex items-center gap-2 rounded-2xl border px-2 py-1.5 text-left transition',
-                          theme === t
-                            ? 'border-slate-900 bg-slate-900 text-slate-50'
-                            : 'border-slate-200 bg-slate-50 hover:border-slate-300',
+                          'flex flex-col gap-0.5 rounded-lg border px-3 py-2 text-left text-[11px] transition',
+                          personality.id === item.id
+                            ? 'border-cyan-300 bg-cyan-300 text-slate-950'
+                            : 'border-white/10 bg-white/[0.045] text-slate-300 hover:border-cyan-300/40',
                         )}
                       >
-                        <span
-                          className={cn('h-4 w-4 rounded-full border-2 border-white shadow', THEMES[t].primary)}
-                        />
-                        <span className="capitalize">{t}</span>
+                        <span className="font-semibold">{item.label}</span>
+                        <span className={cn('text-[10px]', personality.id === item.id ? 'text-slate-800' : 'text-slate-500')}>
+                          {item.description}
+                        </span>
                       </button>
                     ))}
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-500">
-                  <p>
-                    API anahtarlarını doğrudan frontend içinde tutmak güvenli değildir. Üretimde Bytez ve Tavily
-                    isteklerini backend proxy üzerinden geçirmen önerilir.
-                  </p>
+                <div>
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-300">
+                    <Palette size={13} /> Vurgu rengi
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    {(Object.keys(THEMES) as ThemeId[]).map((item) => (
+                      <button
+                        key={item}
+                        onClick={() => setTheme(item)}
+                        className={cn(
+                          'flex items-center gap-2 rounded-lg border px-2 py-2 text-left transition',
+                          theme === item
+                            ? 'border-cyan-300 bg-cyan-300 text-slate-950'
+                            : 'border-white/10 bg-white/[0.045] text-slate-300 hover:border-cyan-300/40',
+                        )}
+                      >
+                        <span className={cn('h-4 w-4 rounded-lg border border-white/40', THEMES[item].dot)} />
+                        <span>{THEMES[item].label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-300">
+                    <Layers3 size={13} /> Chat yoğunluğu
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    <button
+                      onClick={() => setCompactMode(false)}
+                      className={cn(
+                        'rounded-lg border px-3 py-2 text-left transition',
+                        !compactMode
+                          ? 'border-cyan-300 bg-cyan-300 text-slate-950'
+                          : 'border-white/10 bg-white/[0.045] text-slate-300 hover:border-cyan-300/40',
+                      )}
+                    >
+                      <span className="block font-semibold">Rahat</span>
+                      <span className={cn('text-[10px]', !compactMode ? 'text-slate-800' : 'text-slate-500')}>
+                        Daha geniş okuma
+                      </span>
+                    </button>
+                    <button
+                      onClick={() => setCompactMode(true)}
+                      className={cn(
+                        'rounded-lg border px-3 py-2 text-left transition',
+                        compactMode
+                          ? 'border-cyan-300 bg-cyan-300 text-slate-950'
+                          : 'border-white/10 bg-white/[0.045] text-slate-300 hover:border-cyan-300/40',
+                      )}
+                    >
+                      <span className="block font-semibold">Sıkı</span>
+                      <span className={cn('text-[10px]', compactMode ? 'text-slate-800' : 'text-slate-500')}>
+                        Daha az ekran kaplar
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-cyan-300/25 bg-cyan-300/10 p-3 text-[11px] leading-5 text-cyan-50">
+                  API anahtarları frontend içinde tutulmaz. Kuvin AI yanıtları hata içerebilir; kişisel verilerini
+                  sohbete yazmaman önerilir.
                 </div>
               </div>
 
-              <div className="flex items-center justify-end border-t border-slate-100 bg-slate-50 px-5 py-3 text-[11px] text-slate-500">
+              <div className="flex items-center justify-end border-t border-white/10 px-5 py-3 text-[11px] text-slate-500">
                 <span>Değişiklikler anında uygulanır.</span>
               </div>
             </motion.div>

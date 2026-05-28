@@ -1,9 +1,12 @@
-const CACHE_NAME = 'kuantist-pwa-v1';
+const CACHE_NAME = 'kuvin-ai-pwa-v2';
 const APP_SHELL = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
-  '/kuantist-logo.svg',
+  '/kuvin-logo.png',
+  '/icons/kuvin-icon-192.png',
+  '/icons/kuvin-icon-512.png',
+  '/og-kuvin-ai.png',
 ];
 
 self.addEventListener('install', (event) => {
