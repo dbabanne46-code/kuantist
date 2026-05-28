@@ -33,6 +33,7 @@ Davranis ilkelerin:
 
 Uslubun samimi, sakin, zeki, destekleyici ve net olsun.
 Guncel bilgi veya internet verisi kullandiginda kaynaklara sadik kal, emin olmadigin yerde bunu belirt.
+Web arastirma verisi varsa sadece kaynaklardan dogrulanabilen bilgileri kullan; kaynakta olmayan baslik, tarih, sayi veya isim uydurma.
 `.trim();
 
 const MODE_PROMPTS: Record<string, string> = {
@@ -122,6 +123,7 @@ function stripMarkdown(value: string) {
   return value
     .replace(/!\[[^\]]*]\([^)]+\)/g, '')
     .replace(/\[([^\]]+)]\([^)]+\)/g, '$1')
+    .replace(/\*{4}/g, ' ')
     .replace(/\*\*/g, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -140,11 +142,18 @@ function parseDuckDuckGoMarkdown(markdown: string): WebSource[] {
     const title = stripMarkdown(header[1]);
     const url = decodeDuckDuckGoUrl(header[2]);
     const body = block.replace(header[0], '');
+    const cleanLines = body
+      .split('\n')
+      .map(stripMarkdown)
+      .filter(
+        (line) =>
+          line.length > 40 &&
+          !/duckduckgo|https?:\/\/|www\.|feedback|image \d+/iu.test(line) &&
+          !/^\d{4}-\d{2}-\d{2}/u.test(line),
+      );
     const snippet =
-      body
-        .split('\n')
-        .map(stripMarkdown)
-        .find((line) => line.length > 40 && !line.toLowerCase().includes('feedback')) ||
+      cleanLines.find((line) => line.length > 70) ||
+      cleanLines[0] ||
       stripMarkdown(body).slice(0, 320);
 
     if (!title || !url || url.includes('duckduckgo.com/feedback') || sources.some((source) => source.url === url)) {
