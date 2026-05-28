@@ -5,6 +5,7 @@ import {
   Code2,
   Compass,
   CreditCard,
+  Download,
   ExternalLink,
   FileText,
   Globe2,
@@ -47,6 +48,9 @@ type Role = 'user' | 'assistant';
 type AssistantEngine = 'openai' | 'pollinations' | 'bytez' | 'offline';
 type ThemeId = 'cyan' | 'emerald' | 'violet' | 'amber';
 type AppearanceMode = 'midnight' | 'nebula' | 'focus';
+type ImageStyleId = 'cinematic' | 'product' | 'logo' | 'photoreal' | 'anime' | 'threeD' | 'interface';
+type ImageAspectId = 'square' | 'portrait' | 'landscape';
+type ImageQualityId = 'standard' | 'high' | 'ultra';
 type StudioView = 'home' | 'chat' | 'image' | 'prompts' | 'pricing' | 'about' | 'feedback';
 
 type WebSource = {
@@ -61,6 +65,8 @@ type Message = {
   content: string;
   type?: 'text' | 'image';
   imageUrl?: string;
+  imagePrompt?: string;
+  imageProvider?: string;
   sources?: WebSource[];
   model?: string;
   usedWeb?: boolean;
@@ -236,6 +242,28 @@ const PROMPTS: PromptItem[] = [
   },
 ];
 
+const IMAGE_STYLES: Array<{ id: ImageStyleId; label: string; description: string }> = [
+  { id: 'cinematic', label: 'Cinematic', description: 'Işık, derinlik ve film hissi' },
+  { id: 'photoreal', label: 'Realistic', description: 'Gerçekçi malzeme ve kamera' },
+  { id: 'product', label: 'Product', description: 'Reklam ve ürün renderı' },
+  { id: 'logo', label: 'Logo', description: 'Temiz marka sembolü' },
+  { id: 'threeD', label: '3D Render', description: 'Parlak teknoloji estetiği' },
+  { id: 'anime', label: 'Anime', description: 'İllüstratif karakter/sahne' },
+  { id: 'interface', label: 'UI Mockup', description: 'Modern uygulama ekranı' },
+];
+
+const IMAGE_ASPECTS: Array<{ id: ImageAspectId; label: string; description: string }> = [
+  { id: 'square', label: '1:1', description: 'Logo, avatar, post' },
+  { id: 'portrait', label: '2:3', description: 'Telefon, poster, story' },
+  { id: 'landscape', label: '3:2', description: 'Kapak, hero, sunum' },
+];
+
+const IMAGE_QUALITIES: Array<{ id: ImageQualityId; label: string; description: string }> = [
+  { id: 'standard', label: 'Standard', description: 'Hızlı konsept' },
+  { id: 'high', label: 'High', description: 'Daha net detay' },
+  { id: 'ultra', label: 'Ultra', description: 'En güçlü prompt' },
+];
+
 const PLANS = [
   { name: 'Free Studio', price: '0 TL', text: 'Sohbet, prompt denemeleri ve temel görsel üretim akışı.' },
   { name: 'Creator', price: 'Yakında', text: 'Daha uzun sohbet geçmişi, gelişmiş görsel promptları ve hızlı yanıtlar.' },
@@ -336,6 +364,30 @@ const callKuvinAssistant = async (
   };
 };
 
+const callKuvinImage = async (
+  prompt: string,
+  settings: { style: ImageStyleId; aspect: ImageAspectId; quality: ImageQualityId },
+) => {
+  const response = await fetch('/api/image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt, ...settings }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok || typeof data?.imageUrl !== 'string') {
+    throw new Error(data?.error || 'Kuvin Vision görsel oluşturamadı.');
+  }
+
+  return {
+    imageUrl: data.imageUrl as string,
+    prompt: typeof data.prompt === 'string' ? data.prompt : prompt,
+    provider: typeof data.provider === 'string' ? data.provider : 'image',
+    model: typeof data.model === 'string' ? data.model : 'unknown',
+  };
+};
+
 const SectionShell = ({ children }: { children: ReactNode }) => (
   <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-3 py-4 md:px-8 md:py-6">{children}</div>
 );
@@ -354,6 +406,11 @@ const App: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [logs, setLogs] = useState<SystemLog[]>([]);
   const [imageMode, setImageMode] = useState(false);
+  const [imageStyle, setImageStyle] = useState<ImageStyleId>('cinematic');
+  const [imageAspect, setImageAspect] = useState<ImageAspectId>('square');
+  const [imageQuality, setImageQuality] = useState<ImageQualityId>('high');
+  const [isListening, setIsListening] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState<'idle' | 'listening' | 'unsupported'>('idle');
   const [assistantEngine, setAssistantEngine] = useState<AssistantEngine>('openai');
   const [webAssistEnabled, setWebAssistEnabled] = useState(true);
   const [lastSources, setLastSources] = useState<WebSource[]>([]);
@@ -361,8 +418,12 @@ const App: React.FC = () => {
   const activeSession = sessions.find((s) => s.id === activeId) ?? sessions[0];
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const recognitionRef = useRef<any>(null);
   const themeConf = THEMES[theme];
   const appearanceConf = APPEARANCE_MODES[appearance];
+  const imageStyleInfo = IMAGE_STYLES.find((item) => item.id === imageStyle) ?? IMAGE_STYLES[0];
+  const imageAspectInfo = IMAGE_ASPECTS.find((item) => item.id === imageAspect) ?? IMAGE_ASPECTS[0];
+  const imageQualityInfo = IMAGE_QUALITIES.find((item) => item.id === imageQuality) ?? IMAGE_QUALITIES[1];
 
   const engineLabel = useMemo(() => {
     if (assistantEngine === 'openai') return 'OpenAI Core';
@@ -453,10 +514,11 @@ const App: React.FC = () => {
     if (window.innerWidth < 768) setIsSidebarOpen(false);
   };
 
-  const sendMessage = async () => {
-    if (!input.trim() || !activeSession) return;
+  const sendMessage = async (overrideContent?: string, forceImage = false) => {
+    const rawContent = overrideContent ?? input;
+    if (!rawContent.trim() || !activeSession) return;
 
-    const content = input.trim();
+    const content = rawContent.trim();
     setInput('');
     setActiveView('chat');
     requestAnimationFrame(() => textareaRef.current?.focus());
@@ -473,6 +535,7 @@ const App: React.FC = () => {
 
     const lowerContent = content.toLocaleLowerCase('tr-TR');
     const wantsImage =
+      forceImage ||
       imageMode ||
       lowerContent.includes('resim çiz') ||
       lowerContent.includes('görsel oluştur') ||
@@ -482,7 +545,7 @@ const App: React.FC = () => {
 
     try {
       if (wantsImage) {
-        addLog('Görsel hazırlanıyor');
+        addLog(`Kuvin Vision hazırlanıyor: ${imageStyleInfo.label}, ${imageAspectInfo.label}, ${imageQualityInfo.label}`);
 
         const prompt =
           content
@@ -491,23 +554,26 @@ const App: React.FC = () => {
             .replace(/görsel oluştur/gi, '')
             .trim() || 'detaylı, sinematik bir AI stüdyo illüstrasyonu';
 
-        const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(
-          prompt,
-        )}?width=1024&height=1024&nologo=true`;
-
-        await new Promise((resolve) => setTimeout(resolve, 1400));
+        const result = await callKuvinImage(prompt, {
+          style: imageStyle,
+          aspect: imageAspect,
+          quality: imageQuality,
+        });
 
         const aiMsg: Message = {
           id: uuidv4(),
           role: 'assistant',
           type: 'image',
-          content: 'Görsel hazır. İstersen promptu daha keskin bir stile çevirip yeniden deneyebilirim.',
-          imageUrl,
+          content: `Kuvin Vision görseli hazır. Stil: ${imageStyleInfo.label}, format: ${imageAspectInfo.label}, kalite: ${imageQualityInfo.label}.`,
+          imageUrl: result.imageUrl,
+          imagePrompt: result.prompt,
+          imageProvider: result.provider,
+          model: result.model,
           createdAt: Date.now(),
         };
 
         updateActiveMessages((prev) => [...prev, aiMsg]);
-        addLog('Görsel hazır');
+        addLog(`Görsel hazır: ${result.provider}`);
         return;
       }
 
@@ -624,6 +690,67 @@ const App: React.FC = () => {
       event.preventDefault();
       if (!isProcessing) sendMessage();
     }
+  };
+
+  const startVoiceImage = () => {
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setVoiceStatus('unsupported');
+      addLog('Bu tarayıcı konuşarak görsel oluşturmayı desteklemiyor');
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current?.stop?.();
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognitionRef.current = recognition;
+    recognition.lang = 'tr-TR';
+    recognition.interimResults = true;
+    recognition.continuous = false;
+
+    let finalTranscript = '';
+
+    recognition.onstart = () => {
+      setImageMode(true);
+      setActiveView('chat');
+      setIsListening(true);
+      setVoiceStatus('listening');
+      addLog('Konuşarak görsel komutu dinleniyor');
+    };
+
+    recognition.onresult = (event: any) => {
+      let interimTranscript = '';
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const transcript = event.results[index][0]?.transcript ?? '';
+        if (event.results[index].isFinal) finalTranscript += ` ${transcript}`;
+        else interimTranscript += ` ${transcript}`;
+      }
+
+      const spokenPrompt = `${finalTranscript} ${interimTranscript}`.trim();
+      if (spokenPrompt) setInput(spokenPrompt);
+    };
+
+    recognition.onerror = () => {
+      setIsListening(false);
+      setVoiceStatus('idle');
+      addLog('Ses algılama tamamlanamadı');
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      setVoiceStatus('idle');
+      const spokenPrompt = finalTranscript.trim();
+      if (spokenPrompt) {
+        void sendMessage(spokenPrompt, true);
+      }
+    };
+
+    recognition.start();
   };
 
   const renderPromptGrid = (items = PROMPTS) => (
@@ -803,6 +930,28 @@ const App: React.FC = () => {
                             loading="lazy"
                           />
                         </div>
+                        <div className="flex flex-wrap gap-2">
+                          <a
+                            href={message.imageUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            download="kuvin-ai-image.png"
+                            className="inline-flex items-center gap-1 rounded-lg border border-cyan-300/25 bg-cyan-300/10 px-2 py-1 text-[11px] font-semibold text-cyan-100 transition hover:border-cyan-300/50"
+                          >
+                            <Download size={12} /> Aç / indir
+                          </a>
+                          {message.imageProvider ? (
+                            <span className="inline-flex items-center rounded-lg border border-white/10 bg-slate-950/45 px-2 py-1 text-[11px] text-slate-400">
+                              {message.imageProvider}
+                            </span>
+                          ) : null}
+                        </div>
+                        {message.imagePrompt ? (
+                          <details className="rounded-lg border border-white/10 bg-slate-950/45 px-2 py-1 text-left text-[11px] text-slate-400">
+                            <summary className="cursor-pointer font-semibold text-slate-300">Üretim promptu</summary>
+                            <p className="mt-1 whitespace-pre-wrap leading-5">{message.imagePrompt}</p>
+                          </details>
+                        ) : null}
                       </div>
                     ) : (
                       <div className="prose prose-sm prose-invert max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:bg-slate-950 prose-pre:p-3 prose-pre:text-xs">
@@ -868,25 +1017,146 @@ const App: React.FC = () => {
     if (activeView === 'image') {
       return (
         <SectionShell>
-          <div className="rounded-lg border border-white/10 bg-white/[0.045] p-5">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className={cn('rounded-lg border border-white/10 bg-white/[0.045] p-5', themeConf.glow)}>
+            <div className="grid gap-5 lg:grid-cols-[1.1fr_.9fr]">
               <div>
-                <h1 className="text-2xl font-semibold text-white">Kuvin Vision</h1>
-                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-                  Görsel fikrini yaz, Kuvin bunu prompta çevirip hızlı bir konsept görsele dönüştürsün.
+                <div className="inline-flex w-fit items-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-300/10 px-3 py-1.5 text-xs font-semibold text-cyan-100">
+                  <Mic size={14} /> Konuşarak görsel oluştur
+                </div>
+                <h1 className="mt-4 text-3xl font-semibold text-white md:text-4xl">Kuvin Vision Pro</h1>
+                <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300">
+                  Görsel fikrini konuş veya yaz. Kuvin; stil, format ve kalite ayarlarını kullanarak promptu zenginleştirir,
+                  OpenAI image modeli varsa onu, yoksa gelişmiş fallback motorunu çalıştırır.
                 </p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    onClick={startVoiceImage}
+                    disabled={isProcessing}
+                    className={cn(
+                      'inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition',
+                      isListening ? 'bg-rose-400 text-slate-950' : themeConf.button,
+                      isProcessing && 'cursor-not-allowed opacity-50',
+                    )}
+                  >
+                    <Mic size={16} /> {isListening ? 'Dinliyorum...' : 'Konuş ve oluştur'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setImageMode(true);
+                      setActiveView('chat');
+                      requestAnimationFrame(() => textareaRef.current?.focus());
+                    }}
+                    className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.06] px-4 py-2 text-sm font-semibold text-slate-100 transition hover:border-cyan-300/50"
+                  >
+                    <Brush size={16} /> Yazıyla üret
+                  </button>
+                </div>
+                {voiceStatus === 'unsupported' ? (
+                  <p className="mt-3 text-xs text-amber-200">
+                    Bu tarayıcı ses algılamayı desteklemiyor. Chrome veya Edge ile deneyebilirsin.
+                  </p>
+                ) : null}
               </div>
-              <button
-                onClick={() => {
-                  setImageMode(true);
-                  setActiveView('chat');
-                }}
-                className={cn('inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition', themeConf.button)}
-              >
-                <Brush size={16} /> Studio modunu aç
-              </button>
+
+              <div className="rounded-lg border border-white/10 bg-slate-950/55 p-4">
+                <div className="text-xs font-semibold uppercase text-slate-500">Aktif üretim ayarı</div>
+                <div className="mt-3 grid gap-2 text-sm">
+                  <div className="rounded-lg border border-white/10 bg-white/[0.045] p-3">
+                    <span className="block text-xs text-slate-500">Stil</span>
+                    <span className="font-semibold text-white">{imageStyleInfo.label}</span>
+                    <span className="mt-1 block text-xs text-slate-400">{imageStyleInfo.description}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded-lg border border-white/10 bg-white/[0.045] p-3">
+                      <span className="block text-xs text-slate-500">Format</span>
+                      <span className="font-semibold text-white">{imageAspectInfo.label}</span>
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-white/[0.045] p-3">
+                      <span className="block text-xs text-slate-500">Kalite</span>
+                      <span className="font-semibold text-white">{imageQualityInfo.label}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
+
+          <div className="grid gap-4 lg:grid-cols-[1.1fr_.9fr]">
+            <div className="rounded-lg border border-white/10 bg-white/[0.045] p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h2 className="text-sm font-semibold text-white">Stil seç</h2>
+                <span className="text-xs text-slate-500">Prompt otomatik güçlenir</span>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {IMAGE_STYLES.map((style) => (
+                  <button
+                    key={style.id}
+                    onClick={() => setImageStyle(style.id)}
+                    className={cn(
+                      'min-h-20 rounded-lg border px-3 py-2 text-left transition',
+                      imageStyle === style.id
+                        ? 'border-cyan-300 bg-cyan-300 text-slate-950'
+                        : 'border-white/10 bg-slate-950/45 text-slate-300 hover:border-cyan-300/40',
+                    )}
+                  >
+                    <span className="block text-sm font-semibold">{style.label}</span>
+                    <span className={cn('mt-1 block text-xs', imageStyle === style.id ? 'text-slate-800' : 'text-slate-500')}>
+                      {style.description}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="rounded-lg border border-white/10 bg-white/[0.045] p-4">
+                <h2 className="mb-3 text-sm font-semibold text-white">Format</h2>
+                <div className="grid gap-2">
+                  {IMAGE_ASPECTS.map((aspect) => (
+                    <button
+                      key={aspect.id}
+                      onClick={() => setImageAspect(aspect.id)}
+                      className={cn(
+                        'flex items-center justify-between rounded-lg border px-3 py-2 text-left transition',
+                        imageAspect === aspect.id
+                          ? 'border-cyan-300 bg-cyan-300 text-slate-950'
+                          : 'border-white/10 bg-slate-950/45 text-slate-300 hover:border-cyan-300/40',
+                      )}
+                    >
+                      <span className="font-semibold">{aspect.label}</span>
+                      <span className={cn('text-xs', imageAspect === aspect.id ? 'text-slate-800' : 'text-slate-500')}>
+                        {aspect.description}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-white/10 bg-white/[0.045] p-4">
+                <h2 className="mb-3 text-sm font-semibold text-white">Kalite</h2>
+                <div className="grid gap-2">
+                  {IMAGE_QUALITIES.map((quality) => (
+                    <button
+                      key={quality.id}
+                      onClick={() => setImageQuality(quality.id)}
+                      className={cn(
+                        'flex items-center justify-between rounded-lg border px-3 py-2 text-left transition',
+                        imageQuality === quality.id
+                          ? 'border-cyan-300 bg-cyan-300 text-slate-950'
+                          : 'border-white/10 bg-slate-950/45 text-slate-300 hover:border-cyan-300/40',
+                      )}
+                    >
+                      <span className="font-semibold">{quality.label}</span>
+                      <span className={cn('text-xs', imageQuality === quality.id ? 'text-slate-800' : 'text-slate-500')}>
+                        {quality.description}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
           {renderPromptGrid(PROMPTS.filter((prompt) => prompt.image))}
         </SectionShell>
       );
@@ -1220,7 +1490,13 @@ const App: React.FC = () => {
                     onChange={(event) => setInput(event.target.value)}
                     onKeyDown={handleKeyDown}
                     rows={1}
-                    placeholder={imageMode ? 'Nasıl bir görsel istiyorsun?' : 'Bugün ne üretmek istersin?'}
+                    placeholder={
+                      isListening
+                        ? 'Dinliyorum... Görseli anlat.'
+                        : imageMode
+                          ? 'Nasıl bir görsel istiyorsun?'
+                          : 'Bugün ne üretmek istersin?'
+                    }
                     className={cn(
                       'max-h-28 min-h-[46px] flex-1 resize-none border-0 bg-transparent px-1 py-2 text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-0',
                       compactMode ? 'text-xs' : 'text-sm',
@@ -1228,14 +1504,22 @@ const App: React.FC = () => {
                   />
 
                   <button
-                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white/10 hover:text-white"
-                    title="Sesli giriş"
+                    onClick={startVoiceImage}
+                    disabled={isProcessing}
+                    className={cn(
+                      'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition',
+                      isListening
+                        ? 'bg-rose-400 text-slate-950'
+                        : 'text-slate-400 hover:bg-white/10 hover:text-white',
+                      isProcessing && 'cursor-not-allowed opacity-45',
+                    )}
+                    title={isListening ? 'Dinlemeyi durdur' : 'Konuşarak görsel oluştur'}
                   >
                     <Mic size={18} />
                   </button>
 
                   <button
-                    onClick={sendMessage}
+                    onClick={() => sendMessage()}
                     disabled={!input.trim() || isProcessing}
                     className={cn(
                       'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg font-semibold shadow-md transition',
@@ -1376,6 +1660,39 @@ const App: React.FC = () => {
                   </span>
                   <span className="text-[10px]">{imageMode ? 'Aktif' : 'Pasif'}</span>
                 </button>
+                <button
+                  onClick={startVoiceImage}
+                  disabled={isProcessing}
+                  className={cn(
+                    'flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition',
+                    isListening
+                      ? 'border-rose-300 bg-rose-300 text-slate-950'
+                      : 'border-white/10 bg-white/[0.045] text-slate-300 hover:border-cyan-300/40',
+                    isProcessing && 'cursor-not-allowed opacity-50',
+                  )}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <Mic size={14} /> Konuşarak görsel
+                  </span>
+                  <span className="text-[10px]">{isListening ? 'Dinliyor' : 'Başlat'}</span>
+                </button>
+                <div className="rounded-lg border border-white/10 bg-slate-950/45 p-3 text-slate-400">
+                  <div className="mb-2 text-[10px] font-semibold uppercase text-slate-500">Vision ayarı</div>
+                  <div className="grid gap-1.5 text-[11px]">
+                    <div className="flex justify-between gap-2">
+                      <span>Stil</span>
+                      <span className="font-semibold text-slate-200">{imageStyleInfo.label}</span>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <span>Format</span>
+                      <span className="font-semibold text-slate-200">{imageAspectInfo.label}</span>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <span>Kalite</span>
+                      <span className="font-semibold text-slate-200">{imageQualityInfo.label}</span>
+                    </div>
+                  </div>
+                </div>
                 <button
                   onClick={handleNewChat}
                   className="flex w-full items-center justify-between rounded-lg border border-white/10 bg-white/[0.045] px-3 py-2 text-left text-slate-300 transition hover:border-cyan-300/40"
