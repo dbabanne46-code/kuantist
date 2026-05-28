@@ -7,8 +7,15 @@ type ChatMessage = {
   content: string;
 };
 
+type WebSource = {
+  title: string;
+  url: string;
+  snippet: string;
+};
+
 const MAX_MESSAGES = 28;
 const MAX_MESSAGE_CHARS = 6000;
+const MAX_WEB_SOURCES = 5;
 
 const BASE_ASSISTANT_PROMPT = `
 Sen Kuantist adli genel amacli bir yapay zeka yardimcisisin.
@@ -25,6 +32,7 @@ Davranis ilkelerin:
 - Kullaniciya sadece fikir verme, mumkunse sonraki pratik adimi da goster.
 
 Uslubun samimi, sakin, zeki, destekleyici ve net olsun.
+Guncel bilgi veya internet verisi kullandiginda kaynaklara sadik kal, emin olmadigin yerde bunu belirt.
 `.trim();
 
 const MODE_PROMPTS: Record<string, string> = {
@@ -77,6 +85,155 @@ function buildPlainPrompt(messages: ChatMessage[], mode: string, searchContext: 
     .join('\n\n');
 }
 
+function getLastUserMessage(messages: ChatMessage[]) {
+  return [...messages].reverse().find((message) => message.role === 'user')?.content.trim() || '';
+}
+
+function shouldUseWebSearch(messages: ChatMessage[], enabled: boolean) {
+  if (!enabled) return false;
+
+  const query = getLastUserMessage(messages);
+  if (!query || query.length < 10) return false;
+
+  const lower = query.toLocaleLowerCase('tr-TR');
+  const casual = /^(selam|merhaba|naber|nasilsin|nasılsın|test|calisiyor musun|çalışıyor musun)[\s?!.,]*$/iu;
+  if (casual.test(lower)) return false;
+
+  return (
+    lower.startsWith('ara ') ||
+    /\b(guncel|güncel|bugun|bugün|son durum|son dakika|haber|fiyat|hava durumu|dolar|euro|altin|altın|borsa|kripto|kimdir|nerede|ne zaman|kac|kaç|202[4-9]|kaynak)\b/iu.test(
+      lower,
+    ) ||
+    query.length > 36
+  );
+}
+
+function decodeDuckDuckGoUrl(rawUrl: string) {
+  try {
+    const url = new URL(rawUrl);
+    const encoded = url.searchParams.get('uddg');
+    return encoded ? decodeURIComponent(encoded) : rawUrl;
+  } catch {
+    return rawUrl;
+  }
+}
+
+function stripMarkdown(value: string) {
+  return value
+    .replace(/!\[[^\]]*]\([^)]+\)/g, '')
+    .replace(/\[([^\]]+)]\([^)]+\)/g, '$1')
+    .replace(/\*\*/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseDuckDuckGoMarkdown(markdown: string): WebSource[] {
+  const sources: WebSource[] = [];
+  const blocks = markdown.split(/\n(?=## \[)/);
+
+  for (const block of blocks) {
+    if (sources.length >= MAX_WEB_SOURCES) break;
+
+    const header = block.match(/^## \[([^\]]+)]\(([^)]+)\)/);
+    if (!header) continue;
+
+    const title = stripMarkdown(header[1]);
+    const url = decodeDuckDuckGoUrl(header[2]);
+    const body = block.replace(header[0], '');
+    const snippet =
+      body
+        .split('\n')
+        .map(stripMarkdown)
+        .find((line) => line.length > 40 && !line.toLowerCase().includes('feedback')) ||
+      stripMarkdown(body).slice(0, 320);
+
+    if (!title || !url || url.includes('duckduckgo.com/feedback') || sources.some((source) => source.url === url)) {
+      continue;
+    }
+
+    sources.push({ title, url, snippet: snippet.slice(0, 320) });
+  }
+
+  return sources;
+}
+
+async function searchWithTavily(query: string): Promise<WebSource[]> {
+  const apiKey = process.env.TAVILY_API_KEY || process.env.VITE_TAVILY_API_KEY;
+  if (!apiKey) return [];
+
+  const response = await fetch('https://api.tavily.com/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      api_key: apiKey,
+      query,
+      search_depth: 'advanced',
+      max_results: MAX_WEB_SOURCES,
+    }),
+  });
+
+  if (!response.ok) return [];
+
+  const data = (await response.json()) as any;
+  if (!Array.isArray(data.results)) return [];
+
+  return data.results
+    .map((result: any) => ({
+      title: String(result.title || result.url || 'Kaynak'),
+      url: String(result.url || ''),
+      snippet: String(result.content || '').slice(0, 320),
+    }))
+    .filter((source: WebSource) => source.url)
+    .slice(0, MAX_WEB_SOURCES);
+}
+
+async function searchWithDuckDuckGo(query: string): Promise<WebSource[]> {
+  const url = `https://duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+  const readerUrl = `https://r.jina.ai/http://${url}`;
+  const response = await fetch(readerUrl, {
+    headers: { Accept: 'text/plain' },
+  });
+
+  if (!response.ok) return [];
+
+  return parseDuckDuckGoMarkdown(await response.text());
+}
+
+async function collectWebContext(messages: ChatMessage[], enabled: boolean) {
+  const query = getLastUserMessage(messages);
+  if (!shouldUseWebSearch(messages, enabled)) {
+    return { context: '', sources: [] as WebSource[] };
+  }
+
+  let sources: WebSource[] = [];
+  try {
+    sources = await searchWithTavily(query);
+  } catch (error) {
+    console.error('Tavily search failed:', error);
+  }
+
+  if (!sources.length) {
+    try {
+      sources = await searchWithDuckDuckGo(query);
+    } catch (error) {
+      console.error('DuckDuckGo search failed:', error);
+    }
+  }
+
+  const context = sources.length
+    ? [
+        '[WEB ARASTIRMA VERILERI]',
+        `Sorgu: ${query}`,
+        `Tarih: ${new Date().toLocaleDateString('tr-TR')}`,
+        ...sources.map(
+          (source, index) => `${index + 1}. ${source.title}\nURL: ${source.url}\nOzet: ${source.snippet}`,
+        ),
+      ].join('\n\n')
+    : '';
+
+  return { context, sources };
+}
+
 async function createPollinationsAnswer(messages: ChatMessage[], mode: string, searchContext: string) {
   const prompt = buildPlainPrompt(messages, mode, searchContext).slice(0, 12000);
   const response = await fetch(`https://text.pollinations.ai/${encodeURIComponent(prompt)}`, {
@@ -116,7 +273,7 @@ function normalizeMessages(value: unknown): ChatMessage[] {
   return value
     .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
     .map((item) => {
-      const role = item.role === 'assistant' ? 'assistant' : 'user';
+      const role: ChatRole = item.role === 'assistant' ? 'assistant' : 'user';
       const rawContent = typeof item.content === 'string' ? item.content : '';
       return {
         role,
@@ -135,8 +292,9 @@ export default async function handler(req: any, res: any) {
   const body = parseBody(req.body);
   const messages = normalizeMessages(body.messages);
   const mode = typeof body.mode === 'string' ? body.mode : 'kuantist';
+  const webEnabled = body.webEnabled !== false;
   const searchContext =
-    typeof body.searchContext === 'string' ? body.searchContext.slice(0, 5000) : '';
+    typeof body.searchContext === 'string' ? body.searchContext.slice(0, 6000) : '';
 
   if (!messages.length) {
     return res.status(400).json({ error: 'At least one message is required.' });
@@ -144,7 +302,16 @@ export default async function handler(req: any, res: any) {
 
   const model = process.env.OPENAI_MODEL || 'gpt-5.5';
   const modePrompt = MODE_PROMPTS[mode] ?? MODE_PROMPTS.kuantist;
-  const instructions = [BASE_ASSISTANT_PROMPT, modePrompt, searchContext].filter(Boolean).join('\n\n');
+  const webContext = await collectWebContext(messages, webEnabled);
+  const combinedSearchContext = [searchContext, webContext.context].filter(Boolean).join('\n\n');
+  const instructions = [
+    BASE_ASSISTANT_PROMPT,
+    modePrompt,
+    `Bugunun tarihi: ${new Date().toLocaleDateString('tr-TR')}.`,
+    combinedSearchContext,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (apiKey) {
@@ -161,6 +328,8 @@ export default async function handler(req: any, res: any) {
       return res.status(200).json({
         answer: response.output_text,
         model,
+        sources: webContext.sources,
+        usedWeb: webContext.sources.length > 0,
       });
     } catch (error) {
       console.error('OpenAI request failed, falling back to Pollinations:', error);
@@ -168,16 +337,20 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const answer = await createPollinationsAnswer(messages, mode, searchContext);
+    const answer = await createPollinationsAnswer(messages, mode, combinedSearchContext);
     return res.status(200).json({
       answer,
       model: 'pollinations',
+      sources: webContext.sources,
+      usedWeb: webContext.sources.length > 0,
     });
   } catch (error) {
     console.error('Pollinations request failed, falling back to local demo:', error);
     return res.status(200).json({
       answer: createLocalAnswer(messages, mode),
       model: 'local-demo',
+      sources: webContext.sources,
+      usedWeb: webContext.sources.length > 0,
     });
   }
 }

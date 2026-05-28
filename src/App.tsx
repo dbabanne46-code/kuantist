@@ -8,7 +8,6 @@ import {
   X,
   MessageSquare,
   Trash2,
-  Monitor,
   Sparkles,
   User,
   Palette,
@@ -17,9 +16,12 @@ import {
   Search,
   Terminal,
   Brush,
-  Brain,
   ServerCog,
-  ShieldCheck
+  ShieldCheck,
+  Globe2,
+  ExternalLink,
+  Newspaper,
+  CheckCircle2
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -29,12 +31,17 @@ import { cn } from './utils/cn';
 
 // API anahtarları
 const BYTEZ_API_KEY = (import.meta as any).env.VITE_BYTEZ_API_KEY as string | undefined;
-const TAVILY_API_KEY = (import.meta as any).env.VITE_TAVILY_API_KEY as string | undefined;
 const bytez = BYTEZ_API_KEY ? new Bytez(BYTEZ_API_KEY) : null;
 const bytezModel = bytez ? bytez.model('openai/gpt-oss-120b') : null;
 
 // ------------ TIPLER ------------
 type Role = 'user' | 'assistant';
+
+type WebSource = {
+  title: string;
+  url: string;
+  snippet?: string;
+};
 
 type Message = {
   id: string;
@@ -42,6 +49,9 @@ type Message = {
   content: string;
   type?: 'text' | 'image';
   imageUrl?: string;
+  sources?: WebSource[];
+  model?: string;
+  usedWeb?: boolean;
   createdAt: number;
 };
 
@@ -165,10 +175,17 @@ const extractBytezText = (output: any): string => {
   return JSON.stringify(output, null, 2);
 };
 
+const KuantistLogo = ({ className }: { className?: string }) => (
+  <span className={cn('inline-flex shrink-0 overflow-hidden rounded-xl bg-slate-950 shadow-sm', className)}>
+    <img src="/kuantist-logo.svg" alt="Kuantist logosu" className="h-full w-full object-cover" />
+  </span>
+);
+
 const callKuantistAssistant = async (
   messages: Array<{ role: Role; content: string }>,
   mode: string,
   searchContext: string,
+  webEnabled: boolean,
 ) => {
   const response = await fetch('/api/chat', {
     method: 'POST',
@@ -177,6 +194,7 @@ const callKuantistAssistant = async (
       messages,
       mode,
       searchContext,
+      webEnabled,
     }),
   });
 
@@ -190,9 +208,22 @@ const callKuantistAssistant = async (
     throw new Error('Kuantist API bos yanit dondurdu.');
   }
 
+  const sources: WebSource[] = Array.isArray(data?.sources)
+    ? data.sources
+        .map((source: any) => ({
+          title: String(source?.title || 'Kaynak'),
+          url: String(source?.url || ''),
+          snippet: typeof source?.snippet === 'string' ? source.snippet : undefined,
+        }))
+        .filter((source: WebSource) => source.url)
+        .slice(0, 5)
+    : [];
+
   return {
     answer: data.answer.trim(),
     model: typeof data?.model === 'string' ? data.model : 'unknown',
+    sources,
+    usedWeb: Boolean(data?.usedWeb || sources.length),
   };
 };
 
@@ -222,7 +253,7 @@ const App: React.FC = () => {
   });
 
   const [input, setInput] = useState('');
-  const [theme, setTheme] = useState<ThemeId>('indigo');
+  const [theme, setTheme] = useState<ThemeId>('cyan');
   const [personality, setPersonality] = useState<Personality>(PERSONALITIES[0]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => window.innerWidth >= 768);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -230,6 +261,8 @@ const App: React.FC = () => {
   const [logs, setLogs] = useState<SystemLog[]>([]);
   const [imageMode, setImageMode] = useState(false);
   const [assistantEngine, setAssistantEngine] = useState<AssistantEngine>('openai');
+  const [webAssistEnabled, setWebAssistEnabled] = useState(true);
+  const [lastSources, setLastSources] = useState<WebSource[]>([]);
 
   const activeSession = sessions.find((s) => s.id === activeId) ?? sessions[0];
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
@@ -249,6 +282,12 @@ const App: React.FC = () => {
       chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
     }
   }, [activeSession?.messages.length, isProcessing]);
+
+  useEffect(() => {
+    const recentSources =
+      [...(activeSession?.messages ?? [])].reverse().find((message) => message.sources?.length)?.sources ?? [];
+    setLastSources(recentSources);
+  }, [activeId, activeSession?.messages.length]);
 
   const themeConf = THEMES[theme];
   const engineLabel =
@@ -381,44 +420,7 @@ const App: React.FC = () => {
         return;
       }
 
-      const needsSearch =
-        content.toLowerCase().startsWith('ara ') ||
-        /\b202[4-9]|202\d|fiyat|güncel|hava durumu|son durum\b/iu.test(content);
-
-      let searchContext = '';
-
-      if (needsSearch && TAVILY_API_KEY) {
-        addLog('🔍 Tavily ile arama yapılıyor…');
-        try {
-          const tavilyRes = await fetch('https://api.tavily.com/search', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              api_key: TAVILY_API_KEY,
-              query: content,
-              search_depth: 'advanced',
-              max_results: 4,
-            }),
-          });
-
-          const data = await tavilyRes.json();
-
-          if (Array.isArray(data.results) && data.results.length) {
-            searchContext =
-              '\n\n[İNTERNET VERİSİ]\n' +
-              data.results
-                .map((r: any, i: number) => `(${i + 1}) ${r.title}\n${r.content}`)
-                .join('\n---\n');
-
-            addLog(`✅ Tavily ${data.results.length} sonuç döndürdü`);
-          } else {
-            addLog('ℹ️ Tavily sonuç döndürmedi');
-          }
-        } catch (err) {
-          console.error(err);
-          addLog('⚠️ Tavily isteği başarısız oldu');
-        }
-      }
+      const searchContext = '';
 
       const textMessages = [
         ...activeSession.messages
@@ -435,7 +437,12 @@ const App: React.FC = () => {
 
       try {
         addLog('Kuantist Core ile yanit hazirlaniyor...');
-        const { answer, model } = await callKuantistAssistant(textMessages, personality.id, searchContext);
+        const { answer, model, sources, usedWeb } = await callKuantistAssistant(
+          textMessages,
+          personality.id,
+          searchContext,
+          webAssistEnabled,
+        );
 
         const aiMsg: Message = {
           id: uuidv4(),
@@ -443,13 +450,17 @@ const App: React.FC = () => {
           content: answer,
           createdAt: Date.now(),
           type: 'text',
+          sources,
+          model,
+          usedWeb,
         };
 
         updateActiveMessages((prev) => [...prev, aiMsg]);
+        if (sources.length) setLastSources(sources);
         setAssistantEngine(
           model === 'local-demo' ? 'offline' : model === 'pollinations' ? 'pollinations' : 'openai',
         );
-        addLog('Kuantist Core yaniti gonderildi');
+        addLog(usedWeb ? 'Web kaynaklariyla yanit gonderildi' : 'Kuantist Core yaniti gonderildi');
         return;
       } catch (err) {
         console.warn(err);
@@ -554,14 +565,7 @@ const App: React.FC = () => {
           >
             <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
               <div className="flex items-center gap-2">
-                <div
-                  className={cn(
-                    'flex h-9 w-9 items-center justify-center rounded-2xl text-white shadow-md',
-                    themeConf.primary,
-                  )}
-                >
-                  <Monitor size={18} />
-                </div>
+                <KuantistLogo className="h-9 w-9 rounded-xl shadow-md" />
                 <div>
                   <div className="text-sm font-semibold leading-tight">Kuantist Panel</div>
                   <div className="text-[11px] text-slate-400">Akıllı sohbet & görsel stüdyo</div>
@@ -698,6 +702,8 @@ const App: React.FC = () => {
               </button>
             )}
 
+            <KuantistLogo className="h-8 w-8 rounded-lg md:hidden" />
+
             <div className="flex min-w-0 flex-col">
               <span className="truncate text-[13px] font-semibold text-slate-800">
                 {activeSession?.title || 'Sohbet'}
@@ -747,51 +753,56 @@ const App: React.FC = () => {
               className="flex-1 space-y-4 overflow-y-auto px-3 py-4 scrollbar-thin md:px-8 md:py-6"
             >
               {isEmpty ? (
-                <div className="flex h-full w-full flex-col items-center justify-center gap-6 px-2 text-center text-slate-500">
+                <div className="flex h-full w-full flex-col items-center justify-center gap-5 px-3 text-center text-slate-500">
                   <div
                     className={cn(
-                      'w-full max-w-sm rounded-3xl border px-5 py-5 shadow-sm',
-                      themeConf.chip,
+                      'w-full max-w-[calc(100vw-3rem)] rounded-lg border border-slate-200 bg-white/95 px-5 py-5 text-left shadow-sm md:max-w-xl',
                     )}
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-slate-900 text-slate-50">
-                        <Monitor size={20} />
-                      </div>
-                      <div className="min-w-0 text-left">
-                        <div className="text-sm font-semibold text-slate-800">Kuantist hazır</div>
-                        <div className="break-words text-xs text-slate-500">
-                          Sohbet başlat, kod sor, metin yazdır, görsel iste…
+                    <div className="flex items-start gap-3">
+                      <KuantistLogo className="h-10 w-10 rounded-lg shadow-sm" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold text-slate-900">Kuantist hazır</div>
+                        <div className="mt-1 break-words text-xs leading-relaxed text-slate-500">
+                          Web destekli araştırma, kod ve metin üretimi için hazır.
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+                          <span className="inline-flex items-center gap-1 rounded-md border border-emerald-100 bg-emerald-50 px-2 py-1 text-emerald-700">
+                            <CheckCircle2 size={12} /> Canlı web yardımı {webAssistEnabled ? 'açık' : 'kapalı'}
+                          </span>
+                          <span className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-slate-500">
+                            <Newspaper size={12} /> Kaynaklı yanıt
+                          </span>
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="grid w-full max-w-2xl gap-3 md:grid-cols-2">
+                  <div className="grid w-full max-w-[calc(100vw-3rem)] gap-3 md:max-w-2xl md:grid-cols-2">
                     {[
                       {
                         icon: <ImagePlus size={16} />,
                         text: 'Geleceğin şehri stilinde bir görsel oluştur',
                       },
                       {
-                        icon: <Search size={16} />,
-                        text: 'Ara: Bugün döviz piyasasında son durum ne?',
+                        icon: <Globe2 size={16} />,
+                        text: 'Ara: Bugün yapay zeka haberlerinde öne çıkanlar ne?',
                       },
                       {
                         icon: <User size={16} />,
                         text: 'Kısa ve profesyonel bir e-posta taslağı yaz',
                       },
                       {
-                        icon: <Sparkles size={16} />,
-                        text: 'Beni bugün motive edecek 3 cümle yazar mısın?',
+                        icon: <Search size={16} />,
+                        text: 'Güncel dolar, euro ve altın piyasasını kaynaklarıyla özetle',
                       },
                     ].map((s, i) => (
                       <button
                         key={i}
                         onClick={() => setInput(s.text)}
-                        className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-left text-[12px] text-slate-600 shadow-sm transition hover:border-slate-300 hover:shadow-md"
+                        className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white px-3 py-3 text-left text-[12px] text-slate-600 shadow-sm transition hover:border-slate-300 hover:shadow-md"
                       >
-                        <div className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-2xl bg-slate-900 text-slate-50">
+                        <div className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md bg-slate-900 text-slate-50">
                           {s.icon}
                         </div>
                         <span>{s.text}</span>
@@ -809,14 +820,13 @@ const App: React.FC = () => {
                       transition={{ duration: 0.18 }}
                       className={cn('flex w-full gap-2 md:gap-3', m.role === 'user' && 'flex-row-reverse')}
                     >
-                      <div
-                        className={cn(
-                          'mt-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-2xl text-[12px] shadow-sm',
-                          m.role === 'user' ? 'bg-slate-900 text-slate-50' : `${themeConf.primary} text-white`,
-                        )}
-                      >
-                        {m.role === 'user' ? <User size={14} /> : <Monitor size={14} />}
-                      </div>
+                      {m.role === 'user' ? (
+                        <div className="mt-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-[12px] text-slate-50 shadow-sm">
+                          <User size={14} />
+                        </div>
+                      ) : (
+                        <KuantistLogo className="mt-1 h-8 w-8 rounded-xl shadow-sm" />
+                      )}
 
                       <div
                         className={cn(
@@ -852,6 +862,34 @@ const App: React.FC = () => {
                               <ReactMarkdown>{m.content}</ReactMarkdown>
                             </div>
                           )}
+                          {m.role === 'assistant' && m.sources?.length ? (
+                            <div className="mt-3 border-t border-slate-200 pt-2">
+                              <div className="mb-1.5 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                                <Globe2 size={12} /> Kaynaklar
+                              </div>
+                              <div className="grid gap-1.5">
+                                {m.sources.map((source, index) => (
+                                  <a
+                                    key={`${source.url}-${index}`}
+                                    href={source.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="group flex items-start justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-left text-[11px] leading-snug text-slate-600 transition hover:border-slate-300 hover:bg-white"
+                                  >
+                                    <span className="min-w-0">
+                                      <span className="font-medium text-slate-700">{index + 1}. {source.title}</span>
+                                      {source.snippet ? (
+                                        <span className="mt-0.5 line-clamp-2 block text-[10px] text-slate-400">
+                                          {source.snippet}
+                                        </span>
+                                      ) : null}
+                                    </span>
+                                    <ExternalLink size={12} className="mt-0.5 flex-shrink-0 text-slate-400 group-hover:text-slate-600" />
+                                  </a>
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
                         </div>
                         <span className="px-1 text-[10px] text-slate-400">
                           {new Date(m.createdAt).toLocaleTimeString('tr-TR', {
@@ -876,7 +914,7 @@ const App: React.FC = () => {
             </div>
 
             <div className="border-t border-slate-200/70 bg-white/90 px-3 py-3 backdrop-blur-md md:px-8 md:py-4">
-              <div className="mx-auto flex w-full max-w-3xl items-end gap-2 rounded-3xl border border-slate-200 bg-slate-50/80 px-2 py-1 shadow-inner">
+              <div className="mx-auto flex w-full max-w-[calc(100vw-2rem)] items-end gap-2 rounded-3xl border border-slate-200 bg-slate-50/80 px-2 py-1 shadow-inner md:max-w-3xl">
                 <button
                   className="inline-flex h-9 w-9 items-center justify-center rounded-2xl text-slate-400 transition hover:bg-slate-200/80 hover:text-slate-700"
                   title="Resim dosyası ekle (demosal)"
@@ -917,16 +955,17 @@ const App: React.FC = () => {
                 </button>
               </div>
 
-              <div className="mx-auto mt-1 flex max-w-3xl items-center justify-between text-[10px] text-slate-400">
-                <span>
-                  Kuantist; OpenAI Core, ücretsiz AI yedeği, Tavily araması ve dahili görsel motoru ile çalışır. Yanıtlar hata içerebilir.
+              <div className="mx-auto mt-1 flex max-w-[calc(100vw-2rem)] items-center justify-between text-[10px] leading-snug text-slate-400 md:max-w-3xl">
+                <span className="hidden sm:inline">
+                  Kuantist; OpenAI Core, ücretsiz AI yedeği, sunucu tarafı web araştırması ve dahili görsel motoru ile çalışır. Yanıtlar hata içerebilir.
                 </span>
+                <span className="sm:hidden">Kuantist yanıtları hata içerebilir.</span>
               </div>
             </div>
           </section>
 
-          <aside className="hidden w-72 flex-col border-l border-slate-200/70 bg-white/80 px-4 py-4 md:flex">
-            <div className="mb-4 rounded-3xl border border-slate-200 bg-slate-50/80 p-3 shadow-sm">
+          <aside className="hidden w-80 flex-col border-l border-slate-200/70 bg-white/90 px-4 py-4 md:flex">
+            <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50/80 p-3 shadow-sm">
               <div className="mb-2 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-slate-900 text-slate-50">
@@ -947,25 +986,79 @@ const App: React.FC = () => {
               <p className="text-[11px] leading-snug text-slate-500">{personality.description}</p>
             </div>
 
-            <div className="mb-4 rounded-3xl border border-slate-200 bg-white p-3 shadow-sm">
+            <div className="mb-4 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
               <div className="mb-2 flex items-center gap-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-slate-900 text-slate-50">
-                  <Brain size={16} />
-                </div>
+                <KuantistLogo className="h-8 w-8 rounded-md" />
                 <div className="flex flex-col">
                   <span className="text-[12px] font-semibold text-slate-800">Asistan çekirdeği</span>
                   <span className="text-[11px] text-slate-500">{engineLabel}</span>
                 </div>
               </div>
               <div className="grid gap-2 text-[11px] text-slate-500">
-                <div className="flex items-center gap-2 rounded-2xl bg-slate-50 px-2 py-1.5">
+                <div className="flex items-center gap-2 rounded-md bg-slate-50 px-2 py-1.5">
                   <ServerCog size={13} className="text-slate-400" />
                   <span>OpenAI anahtarı Vercel API tarafında saklanır.</span>
                 </div>
-                <div className="flex items-center gap-2 rounded-2xl bg-slate-50 px-2 py-1.5">
+                <div className="flex items-center gap-2 rounded-md bg-slate-50 px-2 py-1.5">
                   <ShieldCheck size={13} className="text-slate-400" />
                   <span>OpenAI çalışmazsa ücretsiz AI yedeği devreye girer.</span>
                 </div>
+              </div>
+            </div>
+
+            <div className="mb-4 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-900 text-slate-50">
+                    <Globe2 size={16} />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[12px] font-semibold text-slate-800">Canlı web yardımı</span>
+                    <span className="text-[11px] text-slate-500">
+                      {webAssistEnabled ? 'Güncel sorularda kaynak arar' : 'Sadece model bilgisiyle yanıtlar'}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setWebAssistEnabled((enabled) => !enabled)}
+                  className={cn(
+                    'rounded-md border px-2 py-1 text-[10px] font-medium transition',
+                    webAssistEnabled
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : 'border-slate-200 bg-slate-50 text-slate-500',
+                  )}
+                >
+                  {webAssistEnabled ? 'Açık' : 'Kapalı'}
+                </button>
+              </div>
+
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+                <div className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  <span className="inline-flex items-center gap-1">
+                    <Newspaper size={11} /> Son kaynaklar
+                  </span>
+                  <span>{lastSources.length || 0}/5</span>
+                </div>
+                {lastSources.length ? (
+                  <div className="max-h-32 space-y-1 overflow-y-auto pr-1 scrollbar-thin">
+                    {lastSources.map((source, index) => (
+                      <a
+                        key={`${source.url}-${index}`}
+                        href={source.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center justify-between gap-2 rounded-md px-1.5 py-1 text-[11px] text-slate-600 transition hover:bg-white"
+                      >
+                        <span className="truncate">{source.title}</span>
+                        <ExternalLink size={11} className="flex-shrink-0 text-slate-400" />
+                      </a>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] leading-snug text-slate-500">
+                    Haber, fiyat, hava durumu veya "Ara:" ile başlayan sorularda kaynaklar burada görünür.
+                  </p>
+                )}
               </div>
             </div>
 
@@ -975,7 +1068,7 @@ const App: React.FC = () => {
               <button
                 onClick={() => setImageMode((m) => !m)}
                 className={cn(
-                  'flex w-full items-center justify-between rounded-2xl border px-3 py-2 text-left transition',
+                  'flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition',
                   imageMode
                     ? 'border-slate-800 bg-slate-900 text-slate-50'
                     : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300',
@@ -989,7 +1082,7 @@ const App: React.FC = () => {
 
               <button
                 onClick={handleNewChat}
-                className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 py-2 text-left text-slate-600 transition hover:border-slate-300"
+                className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-slate-600 transition hover:border-slate-300"
               >
                 <span className="inline-flex items-center gap-2">
                   <MessageSquare size={14} /> Yeni konu başlat
@@ -997,14 +1090,14 @@ const App: React.FC = () => {
               </button>
             </div>
 
-            <div className="flex min-h-0 flex-1 flex-col rounded-3xl border border-slate-200 bg-slate-50/80 p-3 text-[11px]">
+            <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-slate-200 bg-slate-50/80 p-3 text-[11px]">
               <div className="mb-2 flex items-center justify-between text-slate-500">
                 <span className="inline-flex items-center gap-1 font-semibold">
                   <Terminal size={12} /> Sistem akışı
                 </span>
                 <span className="text-[10px] text-slate-400">Son {logs.length || 0} olay</span>
               </div>
-              <div className="flex-1 overflow-y-auto rounded-2xl bg-slate-900 p-2 text-[10px] text-emerald-300 scrollbar-thin">
+              <div className="flex-1 overflow-y-auto rounded-md bg-slate-900 p-2 text-[10px] text-emerald-300 scrollbar-thin">
                 {logs.length === 0 ? (
                   <div className="text-slate-500">Henüz log yok. İlk isteğini gönder.</div>
                 ) : (
