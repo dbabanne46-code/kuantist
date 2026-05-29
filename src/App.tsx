@@ -48,7 +48,15 @@ type Role = 'user' | 'assistant';
 type AssistantEngine = 'openai' | 'pollinations' | 'bytez' | 'offline';
 type ThemeId = 'cyan' | 'emerald' | 'violet' | 'amber';
 type AppearanceMode = 'midnight' | 'nebula' | 'focus';
-type ImageStyleId = 'cinematic' | 'product' | 'logo' | 'photoreal' | 'anime' | 'threeD' | 'interface';
+type ImageStyleId =
+  | 'architecture'
+  | 'cinematic'
+  | 'product'
+  | 'logo'
+  | 'photoreal'
+  | 'anime'
+  | 'threeD'
+  | 'interface';
 type ImageAspectId = 'square' | 'portrait' | 'landscape';
 type ImageQualityId = 'standard' | 'high' | 'ultra';
 type StudioView = 'home' | 'chat' | 'image' | 'prompts' | 'pricing' | 'about' | 'feedback';
@@ -243,6 +251,7 @@ const PROMPTS: PromptItem[] = [
 ];
 
 const IMAGE_STYLES: Array<{ id: ImageStyleId; label: string; description: string }> = [
+  { id: 'architecture', label: 'Mimari Plan', description: 'Kat planı ve teknik çizim' },
   { id: 'cinematic', label: 'Cinematic', description: 'Işık, derinlik ve film hissi' },
   { id: 'photoreal', label: 'Realistic', description: 'Gerçekçi malzeme ve kamera' },
   { id: 'product', label: 'Product', description: 'Reklam ve ürün renderı' },
@@ -263,6 +272,11 @@ const IMAGE_QUALITIES: Array<{ id: ImageQualityId; label: string; description: s
   { id: 'high', label: 'High', description: 'Daha net detay' },
   { id: 'ultra', label: 'Ultra', description: 'En güçlü prompt' },
 ];
+
+const isArchitecturalImagePrompt = (value: string) =>
+  /(\bkat plan[ıi]\b|\boturma plan[ıi]\b|\bvaziyet plan[ıi]\b|\bmimari\b|\bplan çiz\b|\bplan ciz\b|\bfloor plan\b|\bblueprint\b|\barchitectural\b|\byatak odas[ıi]\b|\bbanyo\b|\bamerikan mutfak\b|\bkolon\b|\bta[şs][ıi]y[ıi]c[ıi]\b|\bölçü\b|\bolcu\b|\bmetrekare\b|\bkesit\b|\bgörünüş\b|\bgorunus\b)/iu.test(
+    value.toLocaleLowerCase('tr-TR'),
+  );
 
 const PLANS = [
   { name: 'Free Studio', price: '0 TL', text: 'Sohbet, prompt denemeleri ve temel görsel üretim akışı.' },
@@ -385,6 +399,10 @@ const callKuvinImage = async (
     prompt: typeof data.prompt === 'string' ? data.prompt : prompt,
     provider: typeof data.provider === 'string' ? data.provider : 'image',
     model: typeof data.model === 'string' ? data.model : 'unknown',
+    intent: typeof data.intent === 'string' ? data.intent : 'general_image',
+    style: typeof data.style === 'string' ? (data.style as ImageStyleId) : settings.style,
+    aspect: typeof data.aspect === 'string' ? (data.aspect as ImageAspectId) : settings.aspect,
+    quality: typeof data.quality === 'string' ? (data.quality as ImageQualityId) : settings.quality,
   };
 };
 
@@ -539,6 +557,7 @@ const App: React.FC = () => {
       imageMode ||
       lowerContent.includes('resim çiz') ||
       lowerContent.includes('görsel oluştur') ||
+      isArchitecturalImagePrompt(content) ||
       lowerContent.startsWith('/img');
 
     setIsProcessing(true);
@@ -554,17 +573,31 @@ const App: React.FC = () => {
             .replace(/görsel oluştur/gi, '')
             .trim() || 'detaylı, sinematik bir AI stüdyo illüstrasyonu';
 
+        const effectiveStyle = isArchitecturalImagePrompt(prompt) ? 'architecture' : imageStyle;
+        const effectiveAspect = isArchitecturalImagePrompt(prompt) ? 'landscape' : imageAspect;
+        if (effectiveStyle === 'architecture') {
+          setImageStyle('architecture');
+          setImageAspect('landscape');
+        }
+
         const result = await callKuvinImage(prompt, {
-          style: imageStyle,
-          aspect: imageAspect,
+          style: effectiveStyle,
+          aspect: effectiveAspect,
           quality: imageQuality,
         });
+
+        const resultStyleInfo = IMAGE_STYLES.find((item) => item.id === result.style) ?? imageStyleInfo;
+        const resultAspectInfo = IMAGE_ASPECTS.find((item) => item.id === result.aspect) ?? imageAspectInfo;
+        const resultQualityInfo = IMAGE_QUALITIES.find((item) => item.id === result.quality) ?? imageQualityInfo;
+        const isPlan = result.intent === 'architectural_plan';
 
         const aiMsg: Message = {
           id: uuidv4(),
           role: 'assistant',
           type: 'image',
-          content: `Kuvin Vision görseli hazır. Stil: ${imageStyleInfo.label}, format: ${imageAspectInfo.label}, kalite: ${imageQualityInfo.label}.`,
+          content: isPlan
+            ? `Kuvin Vision mimari planı hazır. Teknik plan kilidi açıldı: ${resultAspectInfo.label}, kalite: ${resultQualityInfo.label}.`
+            : `Kuvin Vision görseli hazır. Stil: ${resultStyleInfo.label}, format: ${resultAspectInfo.label}, kalite: ${resultQualityInfo.label}.`,
           imageUrl: result.imageUrl,
           imagePrompt: result.prompt,
           imageProvider: result.provider,
